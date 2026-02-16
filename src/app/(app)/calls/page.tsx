@@ -1,11 +1,12 @@
 import { ClientStatus, LeadLifecycleStatus, StageType } from "@prisma/client";
 import { CallQueuePageClient } from "@/components/modules/calls/call-queue-page-client";
 import { getSessionContext } from "@/lib/server/auth";
+import { getCustomFieldDefinitions } from "@/lib/server/custom-fields";
 import { prisma } from "@/lib/server/prisma";
 
 export default async function CallsPage() {
   const session = await getSessionContext();
-  const [leads, clients] = await Promise.all([
+  const [leads, clients, leadCustomFields, clientCustomFields] = await Promise.all([
     prisma.lead.findMany({
       where: {
         workspaceId: session.workspaceId,
@@ -21,6 +22,7 @@ export default async function CallsPage() {
         phone: true,
         email: true,
         city: true,
+        customData: true,
         nextFollowUpAt: true,
         stage: {
           select: {
@@ -54,6 +56,7 @@ export default async function CallsPage() {
         phone: true,
         email: true,
         status: true,
+        customData: true,
         notes: {
           orderBy: { createdAt: "desc" },
           take: 1,
@@ -66,6 +69,8 @@ export default async function CallsPage() {
       orderBy: [{ createdAt: "asc" }],
       take: 500,
     }),
+    getCustomFieldDefinitions(session.workspaceId, "LEAD"),
+    getCustomFieldDefinitions(session.workspaceId, "CLIENT"),
   ]);
 
   return (
@@ -79,7 +84,8 @@ export default async function CallsPage() {
           phone: lead.phone,
           email: lead.email,
           city: lead.city,
-          nextFollowUpAt: lead.nextFollowUpAt,
+          customData: (lead.customData ?? {}) as Record<string, unknown>,
+          nextFollowUpAt: lead.nextFollowUpAt?.toISOString() ?? null,
           stage: lead.stage,
           lastTouchpoint: lead.touchpoints[0] ?? null,
         }))}
@@ -92,8 +98,31 @@ export default async function CallsPage() {
           phone: client.phone,
           email: client.email,
           status: client.status,
+          customData: (client.customData ?? {}) as Record<string, unknown>,
           lastNote: client.notes[0] ?? null,
         }))}
+      leadCustomFields={leadCustomFields.map((field) => ({
+        id: field.id,
+        key: field.key,
+        label: field.label,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        options: field.options.map((option) => ({
+          label: option.label,
+          value: option.value,
+        })),
+      }))}
+      clientCustomFields={clientCustomFields.map((field) => ({
+        id: field.id,
+        key: field.key,
+        label: field.label,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        options: field.options.map((option) => ({
+          label: option.label,
+          value: option.value,
+        })),
+      }))}
     />
   );
 }

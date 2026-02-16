@@ -6,7 +6,16 @@ import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { ArrowLeft, ArrowRight, CalendarClock, PhoneCall, RefreshCcw } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarClock,
+  PhoneCall,
+  Plus,
+  RefreshCcw,
+  Save,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterBar } from "@/components/app/filter-bar";
@@ -14,6 +23,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { StageBadge, StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Form,
   FormControl,
@@ -27,6 +37,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
+type CustomFieldDefinition = {
+  id: string;
+  key: string;
+  label: string;
+  fieldType: "TEXT" | "TEXTAREA" | "NUMBER" | "SELECT" | "MULTI_SELECT" | "DATE" | "BOOLEAN";
+  isRequired: boolean;
+  options: { label: string; value: string }[];
+};
+
 type LeadQueueItem = {
   id: string;
   businessName: string;
@@ -34,13 +53,14 @@ type LeadQueueItem = {
   phone: string | null;
   email: string | null;
   city: string | null;
-  nextFollowUpAt: Date | null;
+  customData: Record<string, unknown>;
+  nextFollowUpAt: string | null;
   stage: {
     name: string;
     color: string;
   };
   lastTouchpoint: {
-    happenedAt: Date;
+    happenedAt: string | Date;
     summary: string | null;
     notes: string | null;
     outcome: string | null;
@@ -53,10 +73,11 @@ type ClientQueueItem = {
   primaryContactName: string | null;
   phone: string | null;
   email: string | null;
-  status: string;
+  status: "ACTIVE" | "ONBOARDING" | "PAUSED" | "CHURNED";
+  customData: Record<string, unknown>;
   lastNote: {
     body: string;
-    createdAt: Date;
+    createdAt: string | Date;
   } | null;
 };
 
@@ -127,9 +148,13 @@ const FORM_DEFAULTS: CallLogValues = {
 export function CallQueuePageClient({
   leads,
   clients,
+  leadCustomFields,
+  clientCustomFields,
 }: {
   leads: LeadQueueItem[];
   clients: ClientQueueItem[];
+  leadCustomFields: CustomFieldDefinition[];
+  clientCustomFields: CustomFieldDefinition[];
 }) {
   const router = useRouter();
   const [mode, setMode] = React.useState<QueueMode>(clients.length > 0 ? "CLIENT" : "LEAD");
@@ -138,6 +163,9 @@ export function CallQueuePageClient({
   const [leadIndex, setLeadIndex] = React.useState(0);
   const [clientIndex, setClientIndex] = React.useState(0);
   const [submitting, setSubmitting] = React.useState(false);
+  const [savingRecord, setSavingRecord] = React.useState(false);
+  const [newCustomKey, setNewCustomKey] = React.useState("");
+  const [newCustomValue, setNewCustomValue] = React.useState("");
 
   const form = useForm<CallLogValues>({
     resolver: zodResolver(callLogSchema),
@@ -148,6 +176,15 @@ export function CallQueuePageClient({
   const activeIndex = mode === "CLIENT" ? clientIndex : leadIndex;
   const currentItem = queue[activeIndex] ?? null;
   const followUpPreset = form.watch("followUpPreset");
+  const currentCustomFields = mode === "CLIENT" ? clientCustomFields : leadCustomFields;
+  const definedCustomKeys = React.useMemo(
+    () => new Set(currentCustomFields.map((field) => field.key)),
+    [currentCustomFields],
+  );
+  const currentCustomData = (currentItem?.customData ?? {}) as Record<string, unknown>;
+  const adHocCustomEntries = Object.entries(currentCustomData).filter(
+    ([key]) => !definedCustomKeys.has(key),
+  );
 
   React.useEffect(() => {
     if (mode === "CLIENT" && clientQueue.length === 0 && leadQueue.length > 0) {
@@ -213,6 +250,142 @@ export function CallQueuePageClient({
     setLeadQueue((current) => current.filter((item) => item.id !== currentItem.id));
   }
 
+  function updateLeadCurrent(partial: Partial<LeadQueueItem>) {
+    setLeadQueue((current) =>
+      current.map((item, index) => (index === leadIndex ? { ...item, ...partial } : item)),
+    );
+  }
+
+  function updateClientCurrent(partial: Partial<ClientQueueItem>) {
+    setClientQueue((current) =>
+      current.map((item, index) => (index === clientIndex ? { ...item, ...partial } : item)),
+    );
+  }
+
+  function updateCurrentCustomField(key: string, value: unknown) {
+    if (mode === "LEAD") {
+      const lead = leadQueue[leadIndex];
+      if (!lead) {
+        return;
+      }
+      updateLeadCurrent({
+        customData: {
+          ...(lead.customData ?? {}),
+          [key]: value,
+        },
+      });
+      return;
+    }
+
+    const client = clientQueue[clientIndex];
+    if (!client) {
+      return;
+    }
+    updateClientCurrent({
+      customData: {
+        ...(client.customData ?? {}),
+        [key]: value,
+      },
+    });
+  }
+
+  function removeCurrentCustomField(key: string) {
+    if (mode === "LEAD") {
+      const lead = leadQueue[leadIndex];
+      if (!lead) {
+        return;
+      }
+      const nextCustomData = { ...(lead.customData ?? {}) };
+      delete nextCustomData[key];
+      updateLeadCurrent({ customData: nextCustomData });
+      return;
+    }
+
+    const client = clientQueue[clientIndex];
+    if (!client) {
+      return;
+    }
+    const nextCustomData = { ...(client.customData ?? {}) };
+    delete nextCustomData[key];
+    updateClientCurrent({ customData: nextCustomData });
+  }
+
+  function addAdHocCustomField() {
+    const normalizedKey = toCustomKey(newCustomKey);
+    if (normalizedKey.length === 0) {
+      toast.error("Custom field key is required");
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(currentCustomData, normalizedKey)) {
+      toast.error("Custom field key already exists on this record");
+      return;
+    }
+    updateCurrentCustomField(normalizedKey, newCustomValue.trim());
+    setNewCustomKey("");
+    setNewCustomValue("");
+  }
+
+  async function saveCurrentRecord() {
+    if (!currentItem) {
+      return;
+    }
+
+    setSavingRecord(true);
+    try {
+      if (mode === "LEAD") {
+        const lead = currentItem as LeadQueueItem;
+        if (lead.businessName.trim().length === 0) {
+          toast.error("Business name is required");
+          return;
+        }
+
+        const response = await fetch(`/api/v1/leads/${lead.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            businessName: lead.businessName.trim(),
+            contactName: emptyToNull(lead.contactName),
+            phone: emptyToNull(lead.phone),
+            email: emptyToNull(lead.email),
+            city: emptyToNull(lead.city),
+            nextFollowUpAt: lead.nextFollowUpAt ? toIsoStringOrNull(lead.nextFollowUpAt) : null,
+            customData: cleanCustomData(lead.customData),
+          }),
+        });
+
+        await assertSuccess(response, "Could not update lead details");
+      } else {
+        const client = currentItem as ClientQueueItem;
+        if (client.name.trim().length === 0) {
+          toast.error("Client name is required");
+          return;
+        }
+
+        const response = await fetch(`/api/v1/clients/${client.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: client.name.trim(),
+            primaryContactName: emptyToNull(client.primaryContactName),
+            phone: emptyToNull(client.phone),
+            email: emptyToNull(client.email),
+            status: client.status,
+            customData: cleanCustomData(client.customData),
+          }),
+        });
+
+        await assertSuccess(response, "Could not update client details");
+      }
+
+      toast.success("Record details saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save record details";
+      toast.error(message);
+    } finally {
+      setSavingRecord(false);
+    }
+  }
+
   async function submitCall(values: CallLogValues) {
     if (!currentItem) {
       return;
@@ -220,7 +393,7 @@ export function CallQueuePageClient({
 
     const followUpAt = resolveFollowUpAt(values.followUpPreset, values.customFollowUpAt);
     const meetingAt = values.meetingAt && values.meetingAt.trim().length > 0
-      ? new Date(values.meetingAt).toISOString()
+      ? toIsoStringOrNull(values.meetingAt)
       : null;
 
     setSubmitting(true);
@@ -334,34 +507,154 @@ export function CallQueuePageClient({
                     Open Detail
                   </Link>
                 </Button>
+                <Button variant="secondary" onClick={() => void saveCurrentRecord()} disabled={savingRecord}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {savingRecord ? "Saving..." : "Save Details"}
+                </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <DataItem
-                  label="Contact"
-                  value={
-                    mode === "CLIENT"
-                      ? (currentItem as ClientQueueItem).primaryContactName
-                      : (currentItem as LeadQueueItem).contactName
-                  }
-                />
-                <DataItem label="Phone" value={currentItem.phone} />
-                <DataItem label="Email" value={currentItem.email} />
-                <DataItem
-                  label={mode === "CLIENT" ? "Status" : "City"}
-                  value={
-                    mode === "CLIENT"
-                      ? (currentItem as ClientQueueItem).status
-                      : (currentItem as LeadQueueItem).city
-                  }
-                />
-                {mode === "LEAD" ? (
-                  <DataItem
-                    label="Next Follow-up"
-                    value={formatDateTime((currentItem as LeadQueueItem).nextFollowUpAt)}
+              {mode === "LEAD" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <EditableInput
+                    label="Business Name"
+                    value={(currentItem as LeadQueueItem).businessName}
+                    onChange={(value) => updateLeadCurrent({ businessName: value })}
                   />
-                ) : null}
+                  <EditableInput
+                    label="Contact"
+                    value={(currentItem as LeadQueueItem).contactName ?? ""}
+                    onChange={(value) => updateLeadCurrent({ contactName: value })}
+                  />
+                  <EditableInput
+                    label="Phone"
+                    value={(currentItem as LeadQueueItem).phone ?? ""}
+                    onChange={(value) => updateLeadCurrent({ phone: value })}
+                  />
+                  <EditableInput
+                    label="Email"
+                    value={(currentItem as LeadQueueItem).email ?? ""}
+                    onChange={(value) => updateLeadCurrent({ email: value })}
+                  />
+                  <EditableInput
+                    label="City"
+                    value={(currentItem as LeadQueueItem).city ?? ""}
+                    onChange={(value) => updateLeadCurrent({ city: value })}
+                  />
+                  <EditableDateTime
+                    label="Next Follow-up"
+                    value={toDateTimeLocalValue((currentItem as LeadQueueItem).nextFollowUpAt)}
+                    onChange={(value) =>
+                      updateLeadCurrent({
+                        nextFollowUpAt: value.trim().length > 0 ? toIsoStringOrNull(value) : null,
+                      })
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <EditableInput
+                    label="Client Name"
+                    value={(currentItem as ClientQueueItem).name}
+                    onChange={(value) => updateClientCurrent({ name: value })}
+                  />
+                  <EditableInput
+                    label="Primary Contact"
+                    value={(currentItem as ClientQueueItem).primaryContactName ?? ""}
+                    onChange={(value) => updateClientCurrent({ primaryContactName: value })}
+                  />
+                  <EditableInput
+                    label="Phone"
+                    value={(currentItem as ClientQueueItem).phone ?? ""}
+                    onChange={(value) => updateClientCurrent({ phone: value })}
+                  />
+                  <EditableInput
+                    label="Email"
+                    value={(currentItem as ClientQueueItem).email ?? ""}
+                    onChange={(value) => updateClientCurrent({ email: value })}
+                  />
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Status</p>
+                    <Select
+                      value={(currentItem as ClientQueueItem).status}
+                      onValueChange={(value) =>
+                        updateClientCurrent({
+                          status: value as ClientQueueItem["status"],
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ACTIVE">ACTIVE</SelectItem>
+                        <SelectItem value="ONBOARDING">ONBOARDING</SelectItem>
+                        <SelectItem value="PAUSED">PAUSED</SelectItem>
+                        <SelectItem value="CHURNED">CHURNED</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">Custom Fields</p>
+                  <Button size="sm" variant="ghost" asChild>
+                    <Link href="/settings/fields">Manage Definitions</Link>
+                  </Button>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {currentCustomFields.map((field) => (
+                    <EditableConfiguredCustomField
+                      key={field.id}
+                      field={field}
+                      value={currentCustomData[field.key]}
+                      onChange={(value) => updateCurrentCustomField(field.key, value)}
+                    />
+                  ))}
+
+                  {adHocCustomEntries.map(([key, value]) => (
+                    <div key={key} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium">{toTitle(key)}</p>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeCurrentCustomField(key)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Remove
+                        </Button>
+                      </div>
+                      <Input
+                        className="mt-2"
+                        value={stringifyUnknown(value)}
+                        onChange={(event) => updateCurrentCustomField(key, event.target.value)}
+                      />
+                    </div>
+                  ))}
+
+                  <div className="rounded-lg border p-3">
+                    <p className="mb-2 text-sm font-medium">Add Custom Field</p>
+                    <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                      <Input
+                        placeholder="Field key (ex: roof_pitch)"
+                        value={newCustomKey}
+                        onChange={(event) => setNewCustomKey(event.target.value)}
+                      />
+                      <Input
+                        placeholder="Value"
+                        value={newCustomValue}
+                        onChange={(event) => setNewCustomValue(event.target.value)}
+                      />
+                      <Button type="button" onClick={addAdHocCustomField}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="rounded-lg border p-3">
@@ -732,11 +1025,115 @@ async function assertSuccess(response: Response, fallbackMessage: string) {
   throw new Error(message);
 }
 
-function DataItem({ label, value }: { label: string; value: string | null | undefined }) {
+function EditableConfiguredCustomField({
+  field,
+  value,
+  onChange,
+}: {
+  field: CustomFieldDefinition;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const normalizedString = String(value ?? "");
+  const selectValue = normalizedString.length > 0 ? normalizedString : "__none";
+
   return (
     <div className="rounded-lg border p-3">
+      <p className="mb-2 text-sm font-medium">
+        {field.label}
+        {field.isRequired ? " *" : ""}
+      </p>
+      {field.fieldType === "TEXTAREA" ? (
+        <Textarea value={normalizedString} onChange={(event) => onChange(event.target.value)} rows={3} />
+      ) : null}
+      {field.fieldType === "SELECT" ? (
+        <Select value={selectValue} onValueChange={(nextValue) => onChange(nextValue === "__none" ? "" : nextValue)}>
+          <SelectTrigger>
+            <SelectValue placeholder={`Select ${field.label}`} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none">None</SelectItem>
+            {field.options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
+      {field.fieldType === "BOOLEAN" ? (
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={Boolean(value)} onCheckedChange={(checked) => onChange(Boolean(checked))} />
+          <span>Enabled</span>
+        </label>
+      ) : null}
+      {["TEXT", "NUMBER", "DATE"].includes(field.fieldType) ? (
+        <Input
+          type={field.fieldType === "NUMBER" ? "number" : field.fieldType === "DATE" ? "date" : "text"}
+          value={field.fieldType === "DATE" ? toDateInputValue(value) : normalizedString}
+          onChange={(event) => {
+            if (field.fieldType === "NUMBER") {
+              onChange(event.target.value.trim().length === 0 ? null : Number(event.target.value));
+              return;
+            }
+            onChange(event.target.value);
+          }}
+        />
+      ) : null}
+      {field.fieldType === "MULTI_SELECT" ? (
+        <div className="grid gap-2">
+          {field.options.map((option) => (
+            <label key={option.value} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={Array.isArray(value) ? value.includes(option.value) : false}
+                onCheckedChange={(checked) => {
+                  const current = Array.isArray(value) ? value : [];
+                  onChange(
+                    checked
+                      ? [...current, option.value]
+                      : current.filter((item) => item !== option.value),
+                  );
+                }}
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EditableInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-medium">{value && value.trim().length > 0 ? value : "-"}</p>
+      <Input value={value} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function EditableDateTime({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <Input type="datetime-local" value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
@@ -750,6 +1147,95 @@ function formatDateTime(value: Date | string | null) {
     return "-";
   }
   return date.toLocaleString();
+}
+
+function cleanCustomData(customData: Record<string, unknown>) {
+  return Object.entries(customData).reduce<Record<string, unknown>>((acc, [key, value]) => {
+    if (value === undefined || value === null) {
+      return acc;
+    }
+    if (typeof value === "string" && value.trim().length === 0) {
+      return acc;
+    }
+    if (Array.isArray(value) && value.length === 0) {
+      return acc;
+    }
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
+function emptyToNull(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function toDateInputValue(value: unknown) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function toDateTimeLocalValue(value: string | null) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
+}
+
+function toIsoStringOrNull(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+function pad(value: number) {
+  return value.toString().padStart(2, "0");
+}
+
+function stringifyUnknown(value: unknown) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join(", ");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function toCustomKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function toTitle(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
 }
 
 function truncate(value: string, max: number) {
