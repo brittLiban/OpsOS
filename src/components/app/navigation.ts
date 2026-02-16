@@ -6,6 +6,7 @@ import {
   Download,
   LayoutDashboard,
   ListTodo,
+  Phone,
   Settings,
   Users,
 } from "lucide-react";
@@ -16,6 +17,7 @@ export const NAV_GROUPS = [
     items: [
       { href: "/today", label: "Today", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Users },
+      { href: "/calls", label: "Call Queue", icon: Phone },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
       { href: "/pipeline", label: "Pipeline", icon: Columns3 },
       { href: "/imports", label: "Imports", icon: Download },
