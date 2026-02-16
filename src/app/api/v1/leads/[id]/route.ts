@@ -110,3 +110,41 @@ export async function PATCH(request: Request, { params }: Params) {
     return ok(updated);
   });
 }
+
+export async function DELETE(_: Request, { params }: Params) {
+  return withErrorHandling(async () => {
+    const session = await getSessionContext();
+    const leadId = idSchema.parse((await params).id);
+
+    const existing = await prisma.lead.findFirst({
+      where: { id: leadId, workspaceId: session.workspaceId },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Lead not found");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.entityFieldValue.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          entityType: "LEAD",
+          entityId: leadId,
+        },
+      });
+
+      await tx.mergeLog.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          OR: [{ primaryLeadId: leadId }, { mergedLeadId: leadId }],
+        },
+      });
+
+      await tx.lead.delete({
+        where: { id: leadId },
+      });
+    });
+
+    return ok({ deleted: true, id: leadId });
+  });
+}

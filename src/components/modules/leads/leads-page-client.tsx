@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { MoreHorizontal, Plus, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterBar } from "@/components/app/filter-bar";
@@ -16,6 +17,16 @@ import { PageHeader } from "@/components/app/page-header";
 import { StageBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -123,6 +134,7 @@ export function LeadsPageClient({
   const [source, setSource] = React.useState("");
   const [niche, setNiche] = React.useState("");
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [leadDeleteCandidate, setLeadDeleteCandidate] = React.useState<LeadRow | null>(null);
   const [visibleCustomColumns, setVisibleCustomColumns] = React.useState<string[]>(
     customFields.filter((field) => field.showInTable).map((field) => field.key),
   );
@@ -263,6 +275,16 @@ export function LeadsPageClient({
             <DropdownMenuItem asChild>
               <Link href={`/leads/${row.original.id}?action=convert`}>Convert to Client</Link>
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive"
+              onSelect={(event) => {
+                event.preventDefault();
+                setLeadDeleteCandidate(row.original);
+              }}
+            >
+              Delete Lead
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -291,6 +313,41 @@ export function LeadsPageClient({
     ...customColumns,
     ...baseColumns.slice(5),
   ];
+
+  async function deleteLead(leadId: string) {
+    try {
+      const response = await fetch(`/api/v1/leads/${leadId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error();
+      }
+      setRows((current) => current.filter((row) => row.id !== leadId));
+      setTotal((current) => Math.max(0, current - 1));
+      toast.success("Lead deleted");
+    } catch {
+      toast.error("Failed to delete lead");
+    }
+  }
+
+  async function deleteAllLeads() {
+    try {
+      const response = await fetch("/api/v1/leads", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deleteAll: true }),
+      });
+      if (!response.ok) {
+        throw new Error();
+      }
+      setRows([]);
+      setTotal(0);
+      setPage(1);
+      toast.success("All leads deleted");
+    } catch {
+      toast.error("Failed to delete leads");
+    }
+  }
 
   async function onCreateLead(values: LeadFormValues) {
     try {
@@ -327,8 +384,17 @@ export function LeadsPageClient({
         subtitle="Server-paginated lead management with custom field support."
         actions={
           <>
+            {total > 0 ? (
+              <ConfirmDialog
+                trigger={<Button variant="destructive">Delete All Leads</Button>}
+                title="Delete All Leads"
+                description="This will permanently delete every lead and related lead activity in your workspace."
+                confirmLabel="Delete All"
+                onConfirm={deleteAllLeads}
+              />
+            ) : null}
             <Button variant="secondary" asChild>
-              <Link href="/imports/new">Import CSV</Link>
+              <Link href="/imports/new">Import File</Link>
             </Button>
             <Sheet open={createOpen} onOpenChange={setCreateOpen}>
               <SheetTrigger asChild>
@@ -578,7 +644,7 @@ export function LeadsPageClient({
       ) : rows.length === 0 ? (
         <EmptyState
           title="No leads yet"
-          description="Add a lead manually or import a CSV to start populating your pipeline."
+          description="Add a lead manually or import a CSV/Excel file to start populating your pipeline."
           ctaLabel="Create Lead"
           onCta={() => setCreateOpen(true)}
         />
@@ -598,6 +664,39 @@ export function LeadsPageClient({
           />
         </>
       )}
+
+      <AlertDialog
+        open={leadDeleteCandidate !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLeadDeleteCandidate(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lead</AlertDialogTitle>
+            <AlertDialogDescription>
+              {leadDeleteCandidate
+                ? `Delete ${leadDeleteCandidate.businessName} and related lead activity? This action cannot be undone.`
+                : "This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (leadDeleteCandidate) {
+                  void deleteLead(leadDeleteCandidate.id);
+                }
+                setLeadDeleteCandidate(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

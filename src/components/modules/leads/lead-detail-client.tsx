@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CalendarDays, PhoneCall } from "lucide-react";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { PageHeader } from "@/components/app/page-header";
 import { StageBadge, StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
@@ -211,6 +212,22 @@ export function LeadDetailClient({
     }
   }
 
+  async function deleteLead() {
+    try {
+      const response = await fetch(`/api/v1/leads/${lead.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error();
+      }
+      toast.success("Lead deleted");
+      router.push("/leads");
+      router.refresh();
+    } catch {
+      toast.error("Failed to delete lead");
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -398,6 +415,13 @@ export function LeadDetailClient({
             <Button variant="outline" onClick={convertToClient} disabled={converting}>
               {converting ? "Converting..." : "Convert to Client"}
             </Button>
+            <ConfirmDialog
+              trigger={<Button variant="destructive">Delete Lead</Button>}
+              title="Delete Lead"
+              description="This will delete the lead and related lead activity. This action cannot be undone."
+              confirmLabel="Delete"
+              onConfirm={deleteLead}
+            />
           </>
         }
       />

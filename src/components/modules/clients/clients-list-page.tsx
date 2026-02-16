@@ -4,12 +4,14 @@ import * as React from "react";
 import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Search } from "lucide-react";
+import { toast } from "sonner";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterBar } from "@/components/app/filter-bar";
 import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -23,10 +25,11 @@ type ClientRow = {
 };
 
 export function ClientsListPage({ clients }: { clients: ClientRow[] }) {
+  const [rows, setRows] = React.useState(clients);
   const [q, setQ] = React.useState("");
   const [status, setStatus] = React.useState<string>("all");
 
-  const filtered = clients.filter((client) => {
+  const filtered = rows.filter((client) => {
     const matchesQuery =
       q.length === 0 ||
       client.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -34,6 +37,34 @@ export function ClientsListPage({ clients }: { clients: ClientRow[] }) {
     const matchesStatus = status === "all" || client.status === status;
     return matchesQuery && matchesStatus;
   });
+
+  async function deleteClient(clientId: string) {
+    const response = await fetch(`/api/v1/clients/${clientId}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      toast.error("Failed to delete client");
+      return;
+    }
+    setRows((current) => current.filter((client) => client.id !== clientId));
+    toast.success("Client deleted");
+  }
+
+  async function deleteAllClients() {
+    const response = await fetch("/api/v1/clients", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deleteAll: true,
+      }),
+    });
+    if (!response.ok) {
+      toast.error("Failed to delete clients");
+      return;
+    }
+    setRows([]);
+    toast.success("All clients deleted");
+  }
 
   const columns: ColumnDef<ClientRow>[] = [
     {
@@ -65,6 +96,28 @@ export function ClientsListPage({ clients }: { clients: ClientRow[] }) {
       header: "Created",
       cell: ({ row }) => new Date(row.original.createdAt).toLocaleDateString(),
     },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" variant="ghost" asChild>
+            <Link href={`/clients/${row.original.id}`}>View</Link>
+          </Button>
+          <ConfirmDialog
+            trigger={
+              <Button size="sm" variant="ghost">
+                Delete
+              </Button>
+            }
+            title="Delete Client"
+            description={`Delete ${row.original.name} and all related onboarding, notes, tasks, and billing records?`}
+            confirmLabel="Delete"
+            onConfirm={() => deleteClient(row.original.id)}
+          />
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -73,9 +126,20 @@ export function ClientsListPage({ clients }: { clients: ClientRow[] }) {
         title="Clients"
         subtitle="Active client delivery and onboarding."
         actions={
-          <Button asChild>
-            <Link href="/leads">New Client</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            {rows.length > 0 ? (
+              <ConfirmDialog
+                trigger={<Button variant="destructive">Delete All Clients</Button>}
+                title="Delete All Clients"
+                description="This will delete every client in your workspace and all related client data. This action cannot be undone."
+                confirmLabel="Delete All"
+                onConfirm={deleteAllClients}
+              />
+            ) : null}
+            <Button asChild>
+              <Link href="/leads">New Client</Link>
+            </Button>
+          </div>
         }
       />
       <FilterBar>

@@ -15,7 +15,43 @@ type ImportCandidate = {
   normalized: ReturnType<typeof normalizeLeadPayload>;
 };
 
+type ParsedCsvInput = {
+  headers: string[];
+  rows: Record<string, string>[];
+};
+
 const CHUNK_SIZE = 100;
+
+const HEADER_TO_FIELD_MAP: Record<string, string> = {
+  businessname: "businessName",
+  companyname: "businessName",
+  company: "businessName",
+  name: "businessName",
+  contactname: "contactName",
+  contact: "contactName",
+  contactperson: "contactName",
+  primarycontact: "contactName",
+  email: "email",
+  emailaddress: "email",
+  primaryemail: "email",
+  phone: "phone",
+  primaryphone: "phone",
+  phonenumber: "phone",
+  telephone: "phone",
+  mobile: "phone",
+  website: "website",
+  websiteurl: "website",
+  domain: "website",
+  url: "website",
+  city: "city",
+  cityortown: "city",
+  town: "city",
+  source: "source",
+  sourceurl: "source",
+  leadsource: "source",
+  niche: "niche",
+  industry: "niche",
+};
 
 export async function createImportRunFromCsv(input: {
   workspaceId: string;
@@ -38,13 +74,8 @@ export async function createImportRunFromCsv(input: {
     }
   }
 
-  const parsed = Papa.parse<Record<string, string>>(input.csvText, {
-    header: true,
-    skipEmptyLines: true,
-    transformHeader: (header: string) => header.trim(),
-  });
-
-  const headers = parsed.meta.fields ?? [];
+  const parsed = parseCsvInput(input.csvText);
+  const headers = parsed.headers;
   const defaultMapping = Object.fromEntries(
     headers.map((header: string) => [header, toDefaultField(header)]),
   );
@@ -56,14 +87,14 @@ export async function createImportRunFromCsv(input: {
       filename: input.filename,
       idempotencyKey: input.idempotencyKey,
       status: "MAPPING",
-      totalRows: parsed.data.length,
+      totalRows: parsed.rows.length,
       columnMappingJson: defaultMapping,
     },
   });
 
-  if (parsed.data.length > 0) {
+  if (parsed.rows.length > 0) {
     await prisma.importRow.createMany({
-      data: parsed.data.map((row: Record<string, string>, index: number) => {
+      data: parsed.rows.map((row: Record<string, string>, index: number) => {
         const mapped = mapRowByMapping(row, defaultMapping);
         const normalized = normalizeLeadPayload({
           email: stringOrNull(mapped.email),
@@ -769,19 +800,8 @@ function validateMappedRow(mapped: Record<string, unknown>) {
 }
 
 function toDefaultField(header: string) {
-  const normalized = header.trim().toLowerCase();
-  const map: Record<string, string> = {
-    businessname: "businessName",
-    name: "businessName",
-    contactname: "contactName",
-    email: "email",
-    phone: "phone",
-    website: "website",
-    city: "city",
-    source: "source",
-    niche: "niche",
-  };
-  return map[normalized.replace(/\s+/g, "")] ?? `custom:${normalized}`;
+  const normalizedHeader = normalizeHeaderKey(header);
+  return HEADER_TO_FIELD_MAP[normalizedHeader] ?? `custom:${normalizedHeader}`;
 }
 
 function mapRowByMapping(raw: Record<string, string>, mapping: ColumnMapping) {
@@ -795,7 +815,9 @@ function mapRowByMapping(raw: Record<string, string>, mapping: ColumnMapping) {
     }
     if (column.startsWith("$default:")) {
       const key = column.replace("$default:", "");
-      mapped[key] = destination;
+      if (isEmpty(mapped[key])) {
+        mapped[key] = destination;
+      }
       continue;
     }
     if (destination.startsWith("custom:")) {
@@ -806,6 +828,125 @@ function mapRowByMapping(raw: Record<string, string>, mapping: ColumnMapping) {
     }
   }
   return mapped;
+}
+
+function parseCsvInput(csvText: string): ParsedCsvInput {
+  const parsed = Papa.parse<Record<string, string>>(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (header: string) => header.trim(),
+  });
+
+  const headers = (parsed.meta.fields ?? []).map((header) => header.trim());
+  const rows = parsed.data.map((row) =>
+    Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [key, String(value ?? "")]),
+    ),
+  );
+
+  if (!isSingleColumnWrappedCsv(headers, rows)) {
+    return { headers, rows };
+  }
+
+  const encodedHeader = headers[0];
+  const decodedHeaders = splitCsvLine(encodedHeader)
+    .map((token) => normalizeCsvToken(token))
+    .filter((token) => token.length > 0);
+
+  if (decodedHeaders.length === 0) {
+    return { headers, rows };
+  }
+
+  const decodedRows = rows.map((row) =>
+    decodeSingleColumnRow(row[encodedHeader] ?? "", decodedHeaders),
+  );
+
+  return {
+    headers: decodedHeaders,
+    rows: decodedRows,
+  };
+}
+
+function isSingleColumnWrappedCsv(headers: string[], rows: Record<string, string>[]) {
+  if (headers.length !== 1) {
+    return false;
+  }
+  const singleHeader = headers[0];
+  if (!singleHeader.includes(",")) {
+    return false;
+  }
+  return rows.some((row) => {
+    const value = row[singleHeader];
+    return typeof value === "string" && value.includes(",");
+  });
+}
+
+function decodeSingleColumnRow(line: string, headers: string[]) {
+  let tokens = splitCsvLine(line);
+
+  if (tokens.length > headers.length) {
+    const overflowCount = tokens.length - headers.length + 1;
+    tokens = [tokens.slice(0, overflowCount).join(","), ...tokens.slice(overflowCount)];
+  }
+
+  if (tokens.length < headers.length) {
+    tokens = [...tokens, ...new Array(headers.length - tokens.length).fill("")];
+  }
+
+  if (tokens.length > headers.length) {
+    tokens = [
+      ...tokens.slice(0, headers.length - 1),
+      tokens.slice(headers.length - 1).join(","),
+    ];
+  }
+
+  return Object.fromEntries(
+    headers.map((header, index) => [header, normalizeCsvToken(tokens[index] ?? "")]),
+  );
+}
+
+function splitCsvLine(line: string) {
+  const tokens: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+
+    if (char === "\"") {
+      if (inQuotes && line[index + 1] === "\"") {
+        current += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      tokens.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  tokens.push(current);
+  return tokens;
+}
+
+function normalizeCsvToken(token: string) {
+  let value = token.trim();
+  if (value.startsWith("\"") && value.endsWith("\"") && value.length >= 2) {
+    value = value.slice(1, -1);
+  }
+  return value.replace(/""/g, "\"").trim();
+}
+
+function normalizeHeaderKey(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return normalized.length > 0 ? normalized : "field";
 }
 
 function isEmpty(value: unknown) {

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { getSessionContext } from "@/lib/server/auth";
 import { ok, parseBody, parseSearchParams, withErrorHandling } from "@/lib/server/api";
 import { syncEntityFieldValues, validateCustomFields } from "@/lib/server/custom-fields";
@@ -6,7 +7,16 @@ import { buildLeadSearchWhere } from "@/lib/server/lead-search";
 import { normalizeLeadPayload } from "@/lib/server/normalization";
 import { toPageParams } from "@/lib/server/pagination";
 import { prisma } from "@/lib/server/prisma";
-import { leadCreateSchema, leadListQuerySchema } from "@/lib/validation";
+import { idSchema, leadCreateSchema, leadListQuerySchema } from "@/lib/validation";
+
+const deleteLeadsSchema = z
+  .object({
+    deleteAll: z.boolean().optional(),
+    ids: z.array(idSchema).optional(),
+  })
+  .refine((value) => value.deleteAll || (value.ids && value.ids.length > 0), {
+    message: "Provide deleteAll=true or at least one lead id",
+  });
 
 export async function GET(request: Request) {
   return withErrorHandling(async () => {
@@ -121,5 +131,66 @@ export async function POST(request: Request) {
     });
 
     return ok(lead);
+  });
+}
+
+export async function DELETE(request: Request) {
+  return withErrorHandling(async () => {
+    const session = await getSessionContext();
+    const body = await parseBody(request, deleteLeadsSchema);
+
+    let targetIds: string[] = [];
+    if (body.deleteAll) {
+      const leads = await prisma.lead.findMany({
+        where: { workspaceId: session.workspaceId },
+        select: { id: true },
+      });
+      targetIds = leads.map((lead) => lead.id);
+    } else if (body.ids) {
+      const leads = await prisma.lead.findMany({
+        where: {
+          workspaceId: session.workspaceId,
+          id: { in: body.ids },
+        },
+        select: { id: true },
+      });
+      targetIds = leads.map((lead) => lead.id);
+    }
+
+    if (targetIds.length === 0) {
+      return ok({ deleted: true, count: 0, ids: [] });
+    }
+
+    const deletedCount = await prisma.$transaction(async (tx) => {
+      await tx.entityFieldValue.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          entityType: "LEAD",
+          entityId: { in: targetIds },
+        },
+      });
+
+      await tx.mergeLog.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          OR: [{ primaryLeadId: { in: targetIds } }, { mergedLeadId: { in: targetIds } }],
+        },
+      });
+
+      const deleted = await tx.lead.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          id: { in: targetIds },
+        },
+      });
+
+      return deleted.count;
+    });
+
+    return ok({
+      deleted: true,
+      count: deletedCount,
+      ids: targetIds,
+    });
   });
 }

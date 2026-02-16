@@ -95,3 +95,37 @@ export async function PATCH(request: Request, { params }: Params) {
     return ok(updated);
   });
 }
+
+export async function DELETE(_: Request, { params }: Params) {
+  return withErrorHandling(async () => {
+    const session = await getSessionContext();
+    const clientId = idSchema.parse((await params).id);
+
+    const existing = await prisma.client.findFirst({
+      where: {
+        id: clientId,
+        workspaceId: session.workspaceId,
+      },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Client not found");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.entityFieldValue.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          entityType: "CLIENT",
+          entityId: clientId,
+        },
+      });
+
+      await tx.client.delete({
+        where: { id: clientId },
+      });
+    });
+
+    return ok({ deleted: true, id: clientId });
+  });
+}

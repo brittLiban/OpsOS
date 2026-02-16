@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { NAV_GROUPS } from "@/components/app/navigation";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +69,7 @@ export function AppShell({ children }: AppShellProps) {
                 className="pl-9"
               />
             </div>
+            <ThemeToggle />
             <Button size="sm">+ New</Button>
           </header>
           <main className="mx-auto w-full max-w-[1440px] flex-1 p-4 lg:p-6">{children}</main>

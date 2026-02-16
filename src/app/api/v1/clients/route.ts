@@ -3,7 +3,17 @@ import { getSessionContext } from "@/lib/server/auth";
 import { syncEntityFieldValues, validateCustomFields } from "@/lib/server/custom-fields";
 import { toPageParams } from "@/lib/server/pagination";
 import { prisma } from "@/lib/server/prisma";
-import { clientCreateSchema, paginationQuerySchema } from "@/lib/validation";
+import { clientCreateSchema, idSchema, paginationQuerySchema } from "@/lib/validation";
+import { z } from "zod";
+
+const deleteClientsSchema = z
+  .object({
+    deleteAll: z.boolean().optional(),
+    ids: z.array(idSchema).optional(),
+  })
+  .refine((value) => value.deleteAll || (value.ids && value.ids.length > 0), {
+    message: "Provide deleteAll=true or at least one client id",
+  });
 
 export async function GET(request: Request) {
   return withErrorHandling(async () => {
@@ -124,5 +134,60 @@ export async function POST(request: Request) {
     });
 
     return ok(created);
+  });
+}
+
+export async function DELETE(request: Request) {
+  return withErrorHandling(async () => {
+    const session = await getSessionContext();
+    const body = await parseBody(request, deleteClientsSchema);
+
+    let targetIds: string[] = [];
+
+    if (body.deleteAll) {
+      const clients = await prisma.client.findMany({
+        where: { workspaceId: session.workspaceId },
+        select: { id: true },
+      });
+      targetIds = clients.map((client) => client.id);
+    } else if (body.ids) {
+      const clients = await prisma.client.findMany({
+        where: {
+          workspaceId: session.workspaceId,
+          id: { in: body.ids },
+        },
+        select: { id: true },
+      });
+      targetIds = clients.map((client) => client.id);
+    }
+
+    if (targetIds.length === 0) {
+      return ok({ deleted: true, count: 0, ids: [] });
+    }
+
+    const deletedCount = await prisma.$transaction(async (tx) => {
+      await tx.entityFieldValue.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          entityType: "CLIENT",
+          entityId: { in: targetIds },
+        },
+      });
+
+      const deleted = await tx.client.deleteMany({
+        where: {
+          workspaceId: session.workspaceId,
+          id: { in: targetIds },
+        },
+      });
+
+      return deleted.count;
+    });
+
+    return ok({
+      deleted: true,
+      count: deletedCount,
+      ids: targetIds,
+    });
   });
 }

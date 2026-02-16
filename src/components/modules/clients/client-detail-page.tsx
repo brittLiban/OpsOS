@@ -2,8 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, CheckCircle2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
@@ -43,11 +45,25 @@ type ClientDetail = {
 };
 
 export function ClientDetailPage({ client }: { client: ClientDetail }) {
+  const router = useRouter();
   const [items, setItems] = React.useState(client.onboardingItems);
   const [notes, setNotes] = React.useState(client.notes);
   const [noteBody, setNoteBody] = React.useState("");
   const [newTaskTitle, setNewTaskTitle] = React.useState("");
   const [newTaskDueDate, setNewTaskDueDate] = React.useState("");
+
+  async function deleteClient() {
+    const response = await fetch(`/api/v1/clients/${client.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      toast.error("Failed to delete client");
+      return;
+    }
+    toast.success("Client deleted");
+    router.push("/clients");
+    router.refresh();
+  }
 
   async function toggleOnboarding(itemId: string, checked: boolean) {
     const previous = items;
@@ -150,6 +166,13 @@ export function ClientDetailPage({ client }: { client: ClientDetail }) {
         actions={
           <>
             <StatusBadge label={client.status} />
+            <ConfirmDialog
+              trigger={<Button variant="destructive">Delete Client</Button>}
+              title="Delete Client"
+              description="This will delete the client and all related data. This action cannot be undone."
+              confirmLabel="Delete"
+              onConfirm={deleteClient}
+            />
             <Button asChild>
               <Link href="/billing">Add Billing</Link>
             </Button>

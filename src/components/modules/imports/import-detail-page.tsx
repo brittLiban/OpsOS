@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,7 @@ type ImportRow = {
 };
 
 export function ImportDetailPage({ run }: { run: ImportRun }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = React.useState<"created" | "hard" | "soft" | "errors">(
     "created",
   );
@@ -106,15 +109,37 @@ export function ImportDetailPage({ run }: { run: ImportRun }) {
     }
   }
 
+  async function deleteImportRun() {
+    const response = await fetch(`/api/v1/imports/${run.id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      toast.error("Failed to delete import run");
+      return;
+    }
+    toast.success("Import run deleted");
+    router.push("/imports");
+    router.refresh();
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Import Run ${run.id.slice(0, 8)}`}
         subtitle={run.filename}
         actions={
-          <Button variant="secondary" asChild>
-            <Link href="/imports">Back to Imports</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <ConfirmDialog
+              trigger={<Button variant="destructive">Delete Import Run</Button>}
+              title="Delete Import Run"
+              description="This will permanently delete this import run and all import row records."
+              confirmLabel="Delete"
+              onConfirm={deleteImportRun}
+            />
+            <Button variant="secondary" asChild>
+              <Link href="/imports">Back to Imports</Link>
+            </Button>
+          </div>
         }
       />
 

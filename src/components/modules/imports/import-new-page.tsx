@@ -37,6 +37,56 @@ type PreviewRow = {
 
 const IGNORE_MAPPING_VALUE = "__IGNORE__";
 
+const HEADER_TO_DESTINATION_MAP: Record<string, string> = {
+  businessname: "businessName",
+  companyname: "businessName",
+  company: "businessName",
+  name: "businessName",
+  contactname: "contactName",
+  contact: "contactName",
+  contactperson: "contactName",
+  primarycontact: "contactName",
+  email: "email",
+  emailaddress: "email",
+  primaryemail: "email",
+  phone: "phone",
+  primaryphone: "phone",
+  phonenumber: "phone",
+  telephone: "phone",
+  mobile: "phone",
+  website: "website",
+  websiteurl: "website",
+  domain: "website",
+  url: "website",
+  city: "city",
+  cityortown: "city",
+  town: "city",
+  source: "source",
+  sourceurl: "source",
+  leadsource: "source",
+  niche: "niche",
+  industry: "niche",
+};
+
+function normalizeMappingKey(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function toDefaultDestination(header: string, destinationOptions: string[]) {
+  const normalizedHeader = normalizeMappingKey(header);
+  const mappedDestination = HEADER_TO_DESTINATION_MAP[normalizedHeader];
+  if (mappedDestination && destinationOptions.includes(mappedDestination)) {
+    return mappedDestination;
+  }
+
+  const directMatch = destinationOptions.find((option) => {
+    const normalizedOption = normalizeMappingKey(option.replace("custom:", ""));
+    return normalizedOption === normalizedHeader;
+  });
+
+  return directMatch ?? "";
+}
+
 export function ImportNewPage({
   pipelines,
   customFields,
@@ -53,6 +103,7 @@ export function ImportNewPage({
   const [loading, setLoading] = React.useState(false);
   const [defaultPipelineId, setDefaultPipelineId] = React.useState(pipelines[0]?.id ?? "");
   const [defaultStageId, setDefaultStageId] = React.useState(pipelines[0]?.stages[0]?.id ?? "");
+  const [defaultNiche, setDefaultNiche] = React.useState("");
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === defaultPipelineId);
@@ -74,7 +125,7 @@ export function ImportNewPage({
   async function uploadCsv() {
     const selectedFile = file ?? fileInputRef.current?.files?.[0] ?? null;
     if (!selectedFile) {
-      toast.error("Select a CSV file first");
+      toast.error("Select a CSV or Excel file first");
       return;
     }
 
@@ -98,7 +149,7 @@ export function ImportNewPage({
       setImportRunId(json.data.id);
       await loadPreview(json.data.id);
       setStep(2);
-      toast.success("CSV uploaded");
+      toast.success("File uploaded");
     } catch {
       toast.error("Upload failed");
     } finally {
@@ -117,10 +168,7 @@ export function ImportNewPage({
       const headers = Object.keys(json.data.rows[0].raw);
       const defaults = Object.fromEntries(
         headers.map((header) => {
-          const candidate = destinationOptions.find(
-            (option) => option.toLowerCase() === header.trim().toLowerCase().replace(/\s+/g, ""),
-          );
-          return [header, candidate ?? ""];
+          return [header, toDefaultDestination(header, destinationOptions)];
         }),
       );
       setMapping(defaults);
@@ -137,6 +185,7 @@ export function ImportNewPage({
         ...mapping,
         "$default:pipelineId": defaultPipelineId,
         "$default:stageId": defaultStageId,
+        ...(defaultNiche.trim().length > 0 ? { "$default:niche": defaultNiche.trim() } : {}),
       };
       const response = await fetch(`/api/v1/imports/${importRunId}/map`, {
         method: "POST",
@@ -183,7 +232,7 @@ export function ImportNewPage({
     <div className="space-y-6">
       <PageHeader
         title="New Import"
-        subtitle="Upload CSV, map fields, preview, and execute."
+        subtitle="Upload CSV or Excel, map fields, preview, and execute."
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -193,7 +242,7 @@ export function ImportNewPage({
               <CardTitle className="text-sm">Step {number}</CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
-              {number === 1 ? "Upload CSV" : number === 2 ? "Map columns" : "Preview + execute"}
+              {number === 1 ? "Upload file" : number === 2 ? "Map columns" : "Preview + execute"}
             </CardContent>
           </Card>
         ))}
@@ -201,20 +250,20 @@ export function ImportNewPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>1) Upload CSV</CardTitle>
+          <CardTitle>1) Upload File</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <Input
             ref={fileInputRef}
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx,.xls"
             onChange={(event) => {
               const selected = event.target.files?.[0] ?? null;
               setFile(selected);
             }}
           />
           <Button onClick={uploadCsv} disabled={loading}>
-            {loading ? "Uploading..." : "Upload CSV"}
+            {loading ? "Uploading..." : "Upload File"}
           </Button>
         </CardContent>
       </Card>
@@ -225,7 +274,7 @@ export function ImportNewPage({
             <CardTitle>2) Map Columns</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label>Default Pipeline</Label>
                 <Select
@@ -264,6 +313,14 @@ export function ImportNewPage({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Default Niche (optional)</Label>
+                <Input
+                  value={defaultNiche}
+                  onChange={(event) => setDefaultNiche(event.target.value)}
+                  placeholder="Applies when row niche is empty"
+                />
               </div>
             </div>
 
