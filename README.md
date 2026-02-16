@@ -24,9 +24,10 @@ All setup and usage docs are in `docs/`:
 
 ```bash
 npm install
-npm run prisma:generate
-npm run db:test:reset
-npm run dev
+npm run dev:up
 ```
 
 Open `http://localhost:3000`.
+
+`dev:up` starts local Postgres (Docker) if needed, runs Prisma generate + db push, then starts Next.js dev.
+It does not reset your existing data.

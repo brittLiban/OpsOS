@@ -12,6 +12,20 @@
 npm install
 ```
 
+## Fastest path (one command)
+
+```bash
+npm run dev:up
+```
+
+This command:
+- starts local Postgres via Docker if needed
+- runs `prisma generate`
+- runs `prisma db push` (no reset)
+- starts Next.js dev server
+
+Use this if you want to keep your existing database data.
+
 ## 2) Configure environment
 
 Create/update `.env` in repo root:
@@ -56,6 +70,8 @@ npm run db:test:reset
 This command:
 - pushes schema to DB (`prisma db push --force-reset`)
 - seeds baseline workspace/users/pipeline data (`npm run db:seed`)
+
+Warning: this resets/wipes your local DB data.
 
 ## 6) Run the app
 
