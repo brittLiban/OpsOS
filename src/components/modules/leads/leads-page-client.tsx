@@ -83,7 +83,6 @@ type LeadRow = {
   email: string | null;
   phone: string | null;
   city: string | null;
-  source: string | null;
   niche: string | null;
   nextFollowUpAt: string | null;
   lastContactedAt: string | null;
@@ -109,7 +108,6 @@ const leadFormSchema = z.object({
   phone: z.string().optional(),
   website: z.string().optional(),
   city: z.string().optional(),
-  source: z.string().optional(),
   niche: z.string().optional(),
   customData: z.record(z.string(), z.unknown()),
 });
@@ -131,7 +129,6 @@ export function LeadsPageClient({
   const [q, setQ] = React.useState("");
   const [pipelineId, setPipelineId] = React.useState<string>("all");
   const [stageId, setStageId] = React.useState<string>("all");
-  const [source, setSource] = React.useState("");
   const [niche, setNiche] = React.useState("");
   const [createOpen, setCreateOpen] = React.useState(false);
   const [leadDeleteCandidate, setLeadDeleteCandidate] = React.useState<LeadRow | null>(null);
@@ -150,7 +147,6 @@ export function LeadsPageClient({
       phone: "",
       website: "",
       city: "",
-      source: "",
       niche: "",
       customData: {},
     },
@@ -176,9 +172,6 @@ export function LeadsPageClient({
       if (stageId !== "all") {
         query.set("stageId", stageId);
       }
-      if (source) {
-        query.set("source", source);
-      }
       if (niche) {
         query.set("niche", niche);
       }
@@ -193,7 +186,7 @@ export function LeadsPageClient({
     } finally {
       setLoading(false);
     }
-  }, [debouncedQ, niche, page, pageSize, pipelineId, source, stageId]);
+  }, [debouncedQ, niche, page, pageSize, pipelineId, stageId]);
 
   React.useEffect(() => {
     fetchRows();
@@ -474,7 +467,7 @@ export function LeadsPageClient({
                       )}
                     />
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      {(["contactName", "email", "phone", "city", "source", "niche"] as const).map((fieldName) => (
+                      {(["contactName", "email", "phone", "city", "niche"] as const).map((fieldName) => (
                         <FormField
                           key={fieldName}
                           control={form.control}
@@ -593,15 +586,6 @@ export function LeadsPageClient({
             setNiche(event.target.value);
           }}
           placeholder="Niche"
-          className="w-[150px]"
-        />
-        <Input
-          value={source}
-          onChange={(event) => {
-            setPage(1);
-            setSource(event.target.value);
-          }}
-          placeholder="Source"
           className="w-[150px]"
         />
         <Dialog>

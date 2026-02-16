@@ -93,7 +93,8 @@ North Dental,north@dental.com,15551112222,Dallas`;
       primary_phone: "phone",
       website_url: "website",
       city_or_town: "city",
-      source_url: "source",
+      notes: "",
+      source_url: "",
     });
 
     expect(importRowCreateMany).toHaveBeenCalledTimes(1);

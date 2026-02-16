@@ -18,6 +18,10 @@ Create/update `.env` in repo root:
 
 ```env
 DATABASE_URL="postgresql://johndoe:randompassword@localhost:5432/mydb?schema=public"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+OPSOS_SECRET_ENCRYPTION_KEY="change-this-to-a-long-random-secret"
+STRIPE_SECRET_KEY=""
+STRIPE_WEBHOOK_SECRET=""
 ```
 
 This project already includes that default local value.

@@ -5,6 +5,7 @@ import {
   CreditCard,
   Download,
   LayoutDashboard,
+  ListTodo,
   Settings,
   Users,
 } from "lucide-react";
@@ -15,6 +16,7 @@ export const NAV_GROUPS = [
     items: [
       { href: "/today", label: "Today", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Users },
+      { href: "/tasks", label: "Tasks", icon: ListTodo },
       { href: "/pipeline", label: "Pipeline", icon: Columns3 },
       { href: "/imports", label: "Imports", icon: Download },
     ],
@@ -35,6 +37,7 @@ export const NAV_GROUPS = [
     items: [
       { href: "/settings/pipelines", label: "Pipelines", icon: Settings },
       { href: "/settings/fields", label: "Custom Fields", icon: Settings },
+      { href: "/settings/stripe", label: "Stripe", icon: CreditCard },
       {
         href: "/settings/script-categories",
         label: "Script Categories",

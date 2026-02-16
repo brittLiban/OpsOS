@@ -21,9 +21,11 @@ type BillingRecord = {
   clientId: string;
   billingTypeId: string;
   amount: unknown;
+  currency: string;
   dueDate: Date;
   status: "DUE" | "PAID" | "OVERDUE" | "VOID";
   paidAt: Date | null;
+  stripePaymentStatus: string | null;
   notes: string | null;
   client: { id: string; name: string };
   billingType: { id: string; name: string };
@@ -61,6 +63,20 @@ export function BillingPageClient({
   const [newDueDate, setNewDueDate] = React.useState("");
   const [newNotes, setNewNotes] = React.useState("");
 
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkoutState = params.get("checkout");
+    if (!checkoutState) {
+      return;
+    }
+    if (checkoutState === "success") {
+      toast.success("Stripe payment completed");
+    }
+    if (checkoutState === "cancel") {
+      toast.error("Stripe checkout canceled");
+    }
+  }, []);
+
   const filtered = records.filter((record) => {
     const matchesStatus = statusFilter === "all" || record.status === statusFilter;
     const matchesType = typeFilter === "all" || record.billingTypeId === typeFilter;
@@ -85,6 +101,27 @@ export function BillingPageClient({
       current.map((record) => (record.id === recordId ? { ...record, ...json.data } : record)),
     );
     toast.success("Marked as paid");
+  }
+
+  async function payWithStripe(recordId: string) {
+    const response = await fetch(`/api/v1/billing/${recordId}/checkout`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: { message?: string } }
+        | null;
+      toast.error(payload?.error?.message ?? "Failed to start Stripe checkout");
+      return;
+    }
+    const json = (await response.json()) as {
+      data: { checkoutUrl: string | null };
+    };
+    if (!json.data.checkoutUrl) {
+      toast.error("Stripe did not return a checkout URL");
+      return;
+    }
+    window.location.href = json.data.checkoutUrl;
   }
 
   async function deleteRecord(recordId: string) {
@@ -160,10 +197,20 @@ export function BillingPageClient({
       cell: ({ row }) => <StatusBadge label={row.original.status} />,
     },
     {
+      id: "stripe",
+      header: "Stripe",
+      cell: ({ row }) => row.original.stripePaymentStatus ?? "-",
+    },
+    {
       id: "actions",
       header: "",
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
+          {row.original.status !== "PAID" ? (
+            <Button size="sm" variant="outline" onClick={() => payWithStripe(row.original.id)}>
+              Pay with Stripe
+            </Button>
+          ) : null}
           {row.original.status !== "PAID" ? (
             <Button size="sm" variant="secondary" onClick={() => markPaid(row.original.id)}>
               Mark Paid
@@ -185,7 +232,7 @@ export function BillingPageClient({
     <div className="space-y-4">
       <PageHeader
         title="Billing"
-        subtitle="Tracking only: due, paid, overdue."
+        subtitle="Track invoices and collect payments with Stripe."
         actions={
           <Dialog open={openCreate} onOpenChange={setOpenCreate}>
             <DialogTrigger asChild>

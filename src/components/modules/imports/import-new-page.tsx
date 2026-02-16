@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -61,12 +62,11 @@ const HEADER_TO_DESTINATION_MAP: Record<string, string> = {
   city: "city",
   cityortown: "city",
   town: "city",
-  source: "source",
-  sourceurl: "source",
-  leadsource: "source",
   niche: "niche",
   industry: "niche",
 };
+
+const AUTOMATIC_IGNORE_HEADERS = new Set(["notes", "note", "source", "sourceurl", "leadsource"]);
 
 function normalizeMappingKey(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -74,6 +74,9 @@ function normalizeMappingKey(value: string) {
 
 function toDefaultDestination(header: string, destinationOptions: string[]) {
   const normalizedHeader = normalizeMappingKey(header);
+  if (!normalizedHeader || AUTOMATIC_IGNORE_HEADERS.has(normalizedHeader)) {
+    return "";
+  }
   const mappedDestination = HEADER_TO_DESTINATION_MAP[normalizedHeader];
   if (mappedDestination && destinationOptions.includes(mappedDestination)) {
     return mappedDestination;
@@ -84,7 +87,7 @@ function toDefaultDestination(header: string, destinationOptions: string[]) {
     return normalizedOption === normalizedHeader;
   });
 
-  return directMatch ?? "";
+  return directMatch ?? `custom:${normalizedHeader}`;
 }
 
 export function ImportNewPage({
@@ -104,9 +107,29 @@ export function ImportNewPage({
   const [defaultPipelineId, setDefaultPipelineId] = React.useState(pipelines[0]?.id ?? "");
   const [defaultStageId, setDefaultStageId] = React.useState(pipelines[0]?.stages[0]?.id ?? "");
   const [defaultNiche, setDefaultNiche] = React.useState("");
+  const [showIgnoredColumns, setShowIgnoredColumns] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === defaultPipelineId);
+  const visibleHeaders = React.useMemo(
+    () =>
+      Object.keys(mapping).filter((header) =>
+        showIgnoredColumns ? true : Boolean(mapping[header] && mapping[header].length > 0),
+      ),
+    [mapping, showIgnoredColumns],
+  );
+
+  function getHeaderCustomOption(header: string) {
+    const normalizedHeader = normalizeMappingKey(header);
+    if (!normalizedHeader || AUTOMATIC_IGNORE_HEADERS.has(normalizedHeader)) {
+      return null;
+    }
+    const customOption = `custom:${normalizedHeader}`;
+    if (destinationOptions.includes(customOption)) {
+      return null;
+    }
+    return customOption;
+  }
 
   const destinationOptions = React.useMemo(() => {
     const base = [
@@ -116,7 +139,6 @@ export function ImportNewPage({
       "phone",
       "website",
       "city",
-      "source",
       "niche",
     ];
     return [...base, ...customFields.map((field) => `custom:${field.key}`)];
@@ -324,37 +346,58 @@ export function ImportNewPage({
               </div>
             </div>
 
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={showIgnoredColumns}
+                onCheckedChange={(checked) => setShowIgnoredColumns(Boolean(checked))}
+              />
+              <span>Show ignored columns</span>
+            </label>
+
             <div className="grid gap-3 md:grid-cols-2">
-              {Object.keys(mapping).map((header) => (
-                <div key={header} className="space-y-1 rounded-lg border p-3">
-                  <p className="text-xs font-semibold">{header}</p>
-                  <Select
-                    value={
-                      mapping[header] && mapping[header].length > 0
-                        ? mapping[header]
-                        : IGNORE_MAPPING_VALUE
-                    }
-                    onValueChange={(value) =>
-                      setMapping((current) => ({
-                        ...current,
-                        [header]: value === IGNORE_MAPPING_VALUE ? "" : value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Ignore column" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={IGNORE_MAPPING_VALUE}>Ignore</SelectItem>
-                      {destinationOptions.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              {visibleHeaders.length === 0 ? (
+                <div className="col-span-full rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  No mapped columns shown. Enable the Show ignored columns toggle to map hidden columns.
                 </div>
-              ))}
+              ) : null}
+              {visibleHeaders.map((header) => {
+                const dynamicCustomOption = getHeaderCustomOption(header);
+                return (
+                  <div key={header} className="space-y-1 rounded-lg border p-3">
+                    <p className="text-xs font-semibold">{header}</p>
+                    <Select
+                      value={
+                        mapping[header] && mapping[header].length > 0
+                          ? mapping[header]
+                          : IGNORE_MAPPING_VALUE
+                      }
+                      onValueChange={(value) =>
+                        setMapping((current) => ({
+                          ...current,
+                          [header]: value === IGNORE_MAPPING_VALUE ? "" : value,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Ignore column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={IGNORE_MAPPING_VALUE}>Ignore</SelectItem>
+                        {destinationOptions.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                        {dynamicCustomOption ? (
+                          <SelectItem value={dynamicCustomOption}>
+                            {dynamicCustomOption}
+                          </SelectItem>
+                        ) : null}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
             </div>
             <Button onClick={saveMappingAndPreview} disabled={loading}>
               {loading ? "Saving..." : "Save Mapping"}

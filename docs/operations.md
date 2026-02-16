@@ -82,6 +82,12 @@ Run production server after build:
 npm run start
 ```
 
+Forward Stripe webhooks locally:
+
+```bash
+stripe listen --forward-to localhost:3000/api/v1/stripe/webhook
+```
+
 ## Troubleshooting
 
 Postgres port already in use:

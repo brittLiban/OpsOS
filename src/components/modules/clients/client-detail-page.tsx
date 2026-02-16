@@ -18,6 +18,10 @@ type ClientDetail = {
   id: string;
   name: string;
   status: string;
+  primaryContactName: string | null;
+  email: string | null;
+  phone: string | null;
+  customData: Record<string, unknown>;
   onboardingItems: {
     id: string;
     title: string;
@@ -44,13 +48,36 @@ type ClientDetail = {
   }[];
 };
 
-export function ClientDetailPage({ client }: { client: ClientDetail }) {
+type ClientCustomField = {
+  id: string;
+  key: string;
+  label: string;
+};
+
+export function ClientDetailPage({
+  client,
+  customFields,
+}: {
+  client: ClientDetail;
+  customFields: ClientCustomField[];
+}) {
   const router = useRouter();
   const [items, setItems] = React.useState(client.onboardingItems);
   const [notes, setNotes] = React.useState(client.notes);
   const [noteBody, setNoteBody] = React.useState("");
   const [newTaskTitle, setNewTaskTitle] = React.useState("");
   const [newTaskDueDate, setNewTaskDueDate] = React.useState("");
+  const configuredFieldKeys = React.useMemo(
+    () => new Set(customFields.map((field) => field.key)),
+    [customFields],
+  );
+  const adHocFields = React.useMemo(
+    () =>
+      Object.entries(client.customData ?? {}).filter(
+        ([key, value]) => !configuredFieldKeys.has(key) && hasDisplayValue(value),
+      ),
+    [client.customData, configuredFieldKeys],
+  );
 
   async function deleteClient() {
     const response = await fetch(`/api/v1/clients/${client.id}`, {
@@ -179,6 +206,31 @@ export function ClientDetailPage({ client }: { client: ClientDetail }) {
           </>
         }
       />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Client Data</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          <DataItem label="Primary Contact" value={client.primaryContactName} />
+          <DataItem label="Email" value={client.email} />
+          <DataItem label="Phone" value={client.phone} />
+          {customFields.map((field) => (
+            <DataItem
+              key={field.id}
+              label={field.label}
+              value={formatFieldValue(client.customData?.[field.key])}
+            />
+          ))}
+          {adHocFields.map(([key, value]) => (
+            <DataItem
+              key={key}
+              label={toFieldLabel(key)}
+              value={formatFieldValue(value)}
+            />
+          ))}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
@@ -318,4 +370,50 @@ export function ClientDetailPage({ client }: { client: ClientDetail }) {
       </div>
     </div>
   );
+}
+
+function DataItem({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm font-medium">{value && value.length > 0 ? value : "-"}</p>
+    </div>
+  );
+}
+
+function hasDisplayValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value).length > 0;
+  }
+  return true;
+}
+
+function formatFieldValue(value: unknown) {
+  if (!hasDisplayValue(value)) {
+    return "-";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join(", ");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function toFieldLabel(key: string) {
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
 }

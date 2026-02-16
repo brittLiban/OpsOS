@@ -46,9 +46,6 @@ const HEADER_TO_FIELD_MAP: Record<string, string> = {
   city: "city",
   cityortown: "city",
   town: "city",
-  source: "source",
-  sourceurl: "source",
-  leadsource: "source",
   niche: "niche",
   industry: "niche",
 };
@@ -801,6 +798,9 @@ function validateMappedRow(mapped: Record<string, unknown>) {
 
 function toDefaultField(header: string) {
   const normalizedHeader = normalizeHeaderKey(header);
+  if (["notes", "note", "source", "sourceurl", "leadsource"].includes(normalizedHeader)) {
+    return "";
+  }
   return HEADER_TO_FIELD_MAP[normalizedHeader] ?? `custom:${normalizedHeader}`;
 }
 
