@@ -1,10 +1,11 @@
 import { getSessionContext } from "@/lib/server/auth";
+import { getCustomFieldDefinitions } from "@/lib/server/custom-fields";
 import { prisma } from "@/lib/server/prisma";
 import { TasksPageClient } from "@/components/modules/tasks/tasks-page-client";
 
 export default async function TasksPage() {
   const session = await getSessionContext();
-  const [tasks, leads, clients] = await Promise.all([
+  const [tasks, leads, clients, taskTypes, taskCustomFields] = await Promise.all([
     prisma.task.findMany({
       where: { workspaceId: session.workspaceId },
       include: {
@@ -15,6 +16,12 @@ export default async function TasksPage() {
           },
         },
         client: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        taskType: {
           select: {
             id: true,
             name: true,
@@ -39,11 +46,28 @@ export default async function TasksPage() {
       },
       orderBy: { name: "asc" },
     }),
+    prisma.taskType.findMany({
+      where: { workspaceId: session.workspaceId, isActive: true },
+      select: {
+        id: true,
+        name: true,
+      },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+    getCustomFieldDefinitions(session.workspaceId, "TASK"),
   ]);
+
+  const taskRows = tasks.map((task) => ({
+    ...task,
+    customData:
+      task.customData && typeof task.customData === "object" && !Array.isArray(task.customData)
+        ? (task.customData as Record<string, unknown>)
+        : {},
+  }));
 
   return (
     <TasksPageClient
-      initialTasks={tasks}
+      initialTasks={taskRows}
       leadOptions={leads.map((lead) => ({
         id: lead.id,
         label: lead.businessName,
@@ -51,6 +75,21 @@ export default async function TasksPage() {
       clientOptions={clients.map((client) => ({
         id: client.id,
         label: client.name,
+      }))}
+      taskTypeOptions={taskTypes.map((taskType) => ({
+        id: taskType.id,
+        label: taskType.name,
+      }))}
+      customFields={taskCustomFields.map((field) => ({
+        id: field.id,
+        key: field.key,
+        label: field.label,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        options: field.options.map((option) => ({
+          label: option.label,
+          value: option.value,
+        })),
       }))}
     />
   );

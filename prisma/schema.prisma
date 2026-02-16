@@ -85,6 +85,7 @@ enum BillingStatus {
 enum CustomFieldEntityType {
   LEAD
   CLIENT
+  TASK
 }
 
 enum CustomFieldType {
@@ -351,6 +352,7 @@ model Task {
   priority    TaskPriority @default(MEDIUM)
   dueAt       DateTime?
   completedAt DateTime?
+  customData  Json         @default("{}")
   assigneeId  String?      @db.Uuid
   createdById String?      @db.Uuid
   createdAt   DateTime     @default(now())

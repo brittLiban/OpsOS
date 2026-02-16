@@ -23,7 +23,7 @@ type Option = {
 
 type Field = {
   id: string;
-  entityType: "LEAD" | "CLIENT";
+  entityType: "LEAD" | "CLIENT" | "TASK";
   key: string;
   label: string;
   fieldType:
@@ -51,9 +51,17 @@ const FIELD_TYPES = [
   "BOOLEAN",
 ] as const;
 
-export function FieldsSettingsPage({ initialFields }: { initialFields: Field[] }) {
+export function FieldsSettingsPage({
+  initialFields,
+  initialEntityType = "LEAD",
+  lockEntityType = false,
+}: {
+  initialFields: Field[];
+  initialEntityType?: "LEAD" | "CLIENT" | "TASK";
+  lockEntityType?: boolean;
+}) {
   const [fields, setFields] = React.useState(initialFields);
-  const [entityType, setEntityType] = React.useState<"LEAD" | "CLIENT">("LEAD");
+  const [entityType, setEntityType] = React.useState<"LEAD" | "CLIENT" | "TASK">(initialEntityType);
   const [openCreate, setOpenCreate] = React.useState(false);
   const [key, setKey] = React.useState("");
   const [label, setLabel] = React.useState("");
@@ -168,8 +176,12 @@ export function FieldsSettingsPage({ initialFields }: { initialFields: Field[] }
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Custom Fields"
-        subtitle="Configure dynamic fields for Leads and Clients."
+        title={entityType === "TASK" ? "Task Fields" : "Custom Fields"}
+        subtitle={
+          entityType === "TASK"
+            ? "Configure dynamic fields for task tracking."
+            : "Configure dynamic fields for Leads, Clients, and Tasks."
+        }
         actions={
           <Dialog
             open={openCreate}
@@ -193,13 +205,22 @@ export function FieldsSettingsPage({ initialFields }: { initialFields: Field[] }
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Entity</Label>
-                  <Select value={entityType} onValueChange={(value) => setEntityType(value as never)}>
+                  <Select
+                    value={entityType}
+                    onValueChange={(value) => {
+                      if (!lockEntityType) {
+                        setEntityType(value as never);
+                      }
+                    }}
+                    disabled={lockEntityType}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="LEAD">Lead</SelectItem>
                       <SelectItem value="CLIENT">Client</SelectItem>
+                      <SelectItem value="TASK">Task</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -246,27 +267,35 @@ export function FieldsSettingsPage({ initialFields }: { initialFields: Field[] }
         }
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Entity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
-            <Button
-              variant={entityType === "LEAD" ? "default" : "outline"}
-              onClick={() => setEntityType("LEAD")}
-            >
-              Lead Fields
-            </Button>
-            <Button
-              variant={entityType === "CLIENT" ? "default" : "outline"}
-              onClick={() => setEntityType("CLIENT")}
-            >
-              Client Fields
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {!lockEntityType ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Entity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              <Button
+                variant={entityType === "LEAD" ? "default" : "outline"}
+                onClick={() => setEntityType("LEAD")}
+              >
+                Lead Fields
+              </Button>
+              <Button
+                variant={entityType === "CLIENT" ? "default" : "outline"}
+                onClick={() => setEntityType("CLIENT")}
+              >
+                Client Fields
+              </Button>
+              <Button
+                variant={entityType === "TASK" ? "default" : "outline"}
+                onClick={() => setEntityType("TASK")}
+              >
+                Task Fields
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="space-y-4">
         {visibleFields.length === 0 ? (

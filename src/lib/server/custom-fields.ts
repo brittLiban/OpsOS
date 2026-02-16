@@ -5,7 +5,7 @@ export type CustomFieldValueInput = Record<string, unknown>;
 
 export async function getCustomFieldDefinitions(
   workspaceId: string,
-  entityType: "LEAD" | "CLIENT",
+  entityType: "LEAD" | "CLIENT" | "TASK",
 ) {
   return prisma.customField.findMany({
     where: {
@@ -25,7 +25,7 @@ export async function getCustomFieldDefinitions(
 
 export async function validateCustomFields(
   workspaceId: string,
-  entityType: "LEAD" | "CLIENT",
+  entityType: "LEAD" | "CLIENT" | "TASK",
   values: CustomFieldValueInput,
 ) {
   const definitions = await getCustomFieldDefinitions(workspaceId, entityType);
@@ -78,7 +78,7 @@ export async function validateCustomFields(
 export async function syncEntityFieldValues(input: {
   tx: Prisma.TransactionClient;
   workspaceId: string;
-  entityType: "LEAD" | "CLIENT";
+  entityType: "LEAD" | "CLIENT" | "TASK";
   entityId: string;
   values: CustomFieldValueInput;
 }) {

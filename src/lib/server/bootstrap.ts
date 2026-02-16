@@ -1,5 +1,6 @@
 import type { Prisma, StageColor, StageType } from "@prisma/client";
 import {
+  DEFAULT_TASK_TYPES,
   DEFAULT_PIPELINE_NAME,
   DEFAULT_PIPELINE_STAGES,
   DEFAULT_WORKSPACE_NAME,
@@ -21,6 +22,7 @@ export async function ensureBootstrapData() {
   if (workspace) {
     await ensureDefaultPipeline(workspace.id);
     await ensureSystemBillingTypes(workspace.id);
+    await ensureDefaultTaskTypes(workspace.id);
     return workspace;
   }
 
@@ -58,6 +60,7 @@ export async function ensureBootstrapData() {
 
   await ensureDefaultPipeline(createdWorkspace.id);
   await ensureSystemBillingTypes(createdWorkspace.id);
+  await ensureDefaultTaskTypes(createdWorkspace.id);
   await ensureScriptCategories(createdWorkspace.id);
 
   return prisma.workspace.findUniqueOrThrow({
@@ -136,6 +139,27 @@ async function ensureSystemBillingTypes(workspaceId: string) {
     });
     if (!existing) {
       await prisma.billingType.create({ data: billingType });
+    }
+  }
+}
+
+async function ensureDefaultTaskTypes(workspaceId: string) {
+  for (const taskType of DEFAULT_TASK_TYPES) {
+    const existing = await prisma.taskType.findFirst({
+      where: {
+        workspaceId,
+        name: taskType.name,
+      },
+    });
+    if (!existing) {
+      await prisma.taskType.create({
+        data: {
+          workspaceId,
+          name: taskType.name,
+          color: taskType.color,
+          sortOrder: taskType.sortOrder,
+        },
+      });
     }
   }
 }

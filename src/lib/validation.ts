@@ -68,6 +68,7 @@ export const taskCreateSchema = z.object({
   taskTypeId: idSchema.optional().nullable(),
   title: z.string().trim().min(1),
   description: optionalStringSchema,
+  customData: z.record(z.string(), z.unknown()).default({}),
   status: z.nativeEnum(TaskStatus).default(TaskStatus.TODO),
   priority: z.nativeEnum(TaskPriority).default(TaskPriority.MEDIUM),
   dueAt: optionalDateSchema,

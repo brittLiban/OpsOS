@@ -23,6 +23,12 @@ export const DEFAULT_ONBOARDING_TEMPLATE = [
   "Go-live checklist",
 ];
 
+export const DEFAULT_TASK_TYPES = [
+  { name: "Follow-up", color: "TEAL", sortOrder: 0 },
+  { name: "Appointment", color: "INDIGO", sortOrder: 1 },
+  { name: "Other", color: "SLATE", sortOrder: 2 },
+] as const;
+
 export const STAGE_COLOR_PALETTE = [
   "SLATE",
   "BLUE",
