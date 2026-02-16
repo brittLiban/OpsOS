@@ -1,10 +1,11 @@
 import {
+  AlarmClock,
   BookTemplate,
   Building2,
+  ChartNoAxesCombined,
   Columns3,
   CreditCard,
   Download,
-  LayoutDashboard,
   ListTodo,
   Phone,
   Settings,
@@ -15,7 +16,8 @@ export const NAV_GROUPS = [
   {
     label: "Operations",
     items: [
-      { href: "/today", label: "Today", icon: LayoutDashboard },
+      { href: "/dashboard", label: "Dashboard", icon: ChartNoAxesCombined },
+      { href: "/today", label: "Today", icon: AlarmClock },
       { href: "/leads", label: "Leads", icon: Users },
       { href: "/calls", label: "Call Queue", icon: Phone },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
@@ -39,6 +41,7 @@ export const NAV_GROUPS = [
     items: [
       { href: "/settings/pipelines", label: "Pipelines", icon: Settings },
       { href: "/settings/fields", label: "Custom Fields", icon: Settings },
+      { href: "/settings/task-fields", label: "Task Fields", icon: Settings },
       { href: "/settings/stripe", label: "Stripe", icon: CreditCard },
       {
         href: "/settings/script-categories",
