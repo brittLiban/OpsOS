@@ -16,6 +16,7 @@ All setup and usage docs are in `docs/`:
 
 - `docs/README.md` - docs index
 - `docs/getting-started.md` - local setup and running the app
+- `docs/integrations-email-calendar.md` - Google/Microsoft email + calendar setup
 - `docs/stripe-billing.md` - Stripe billing + webhook setup
 - `docs/testing.md` - test strategy and commands
 - `docs/operations.md` - daily development workflow

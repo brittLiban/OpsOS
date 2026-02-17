@@ -42,6 +42,7 @@ export const NAV_GROUPS = [
       { href: "/settings/pipelines", label: "Pipelines", icon: Settings },
       { href: "/settings/fields", label: "Custom Fields", icon: Settings },
       { href: "/settings/task-fields", label: "Task Fields", icon: Settings },
+      { href: "/settings/integrations", label: "Integrations", icon: Settings },
       { href: "/settings/stripe", label: "Stripe", icon: CreditCard },
       {
         href: "/settings/script-categories",

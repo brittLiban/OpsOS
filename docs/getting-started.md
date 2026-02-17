@@ -36,6 +36,12 @@ NEXT_PUBLIC_APP_URL="http://localhost:3000"
 OPSOS_SECRET_ENCRYPTION_KEY="change-this-to-a-long-random-secret"
 STRIPE_SECRET_KEY=""
 STRIPE_WEBHOOK_SECRET=""
+
+# Optional: Email + Calendar integrations
+GOOGLE_OAUTH_CLIENT_ID=""
+GOOGLE_OAUTH_CLIENT_SECRET=""
+MICROSOFT_OAUTH_CLIENT_ID=""
+MICROSOFT_OAUTH_CLIENT_SECRET=""
 ```
 
 This project already includes that default local value.
