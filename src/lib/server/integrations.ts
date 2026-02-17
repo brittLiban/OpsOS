@@ -113,6 +113,34 @@ export type IntegrationPreview = {
   events: { id: string; title: string; startAt: string | null; endAt: string | null }[];
 };
 
+export type SyncedCalendarEvent = {
+  id: string;
+  provider: IntegrationProvider;
+  providerSlug: IntegrationProviderSlug;
+  title: string;
+  startAt: string;
+  endAt: string | null;
+  isAllDay: boolean;
+  link: string | null;
+};
+
+export type SyncedCalendarProviderStatus = {
+  provider: IntegrationProvider;
+  slug: IntegrationProviderSlug;
+  label: string;
+  connected: boolean;
+  synced: boolean;
+  lastError: string | null;
+};
+
+export type SyncedCalendarResult = {
+  windowStart: string;
+  windowEnd: string;
+  hasConnectedProviders: boolean;
+  providers: SyncedCalendarProviderStatus[];
+  events: SyncedCalendarEvent[];
+};
+
 type OAuthTokenPayload = {
   accessToken: string;
   refreshToken: string | null;
@@ -836,6 +864,338 @@ async function getActiveAccessToken(workspaceId: string, provider: IntegrationPr
   }
 
   return decryptSecretValue(account.accessTokenEncrypted);
+}
+
+function toSyncedCalendarProviderStatus(
+  provider: IntegrationProvider,
+  connected: boolean,
+  synced: boolean,
+  lastError: string | null = null,
+): SyncedCalendarProviderStatus {
+  const meta = getProviderMeta(provider);
+  return {
+    provider,
+    slug: meta.slug,
+    label: meta.label,
+    connected,
+    synced,
+    lastError,
+  };
+}
+
+function normalizeIsoDateTime(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+function normalizeAllDayDate(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(`${value}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+function normalizeGoogleEventWindow(event: {
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+}) {
+  const startAt =
+    normalizeIsoDateTime(event.start?.dateTime) ?? normalizeAllDayDate(event.start?.date);
+  if (!startAt) {
+    return null;
+  }
+
+  const endAt =
+    normalizeIsoDateTime(event.end?.dateTime) ?? normalizeAllDayDate(event.end?.date) ?? null;
+  return {
+    startAt,
+    endAt,
+    isAllDay: !event.start?.dateTime && Boolean(event.start?.date),
+  };
+}
+
+function normalizeMicrosoftEventWindow(event: {
+  start?: { dateTime?: string | null };
+  end?: { dateTime?: string | null };
+  isAllDay?: boolean | null;
+}) {
+  const startAt = normalizeIsoDateTime(event.start?.dateTime ?? null);
+  if (!startAt) {
+    return null;
+  }
+  const endAt = normalizeIsoDateTime(event.end?.dateTime ?? null) ?? null;
+  return {
+    startAt,
+    endAt,
+    isAllDay: Boolean(event.isAllDay),
+  };
+}
+
+async function fetchGoogleCalendarEventsRange(input: {
+  accessToken: string;
+  start: Date;
+  end: Date;
+  limit: number;
+}): Promise<SyncedCalendarEvent[]> {
+  const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("timeMin", input.start.toISOString());
+  url.searchParams.set("timeMax", input.end.toISOString());
+  url.searchParams.set("maxResults", String(Math.max(1, Math.min(input.limit, 500))));
+
+  const response = await fetch(url.toString(), {
+    headers: { authorization: `Bearer ${input.accessToken}` },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message || "Google Calendar sync failed");
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    items?: Array<{
+      id?: string;
+      summary?: string;
+      htmlLink?: string;
+      start?: { dateTime?: string; date?: string };
+      end?: { dateTime?: string; date?: string };
+    }>;
+  };
+
+  const events: SyncedCalendarEvent[] = [];
+  for (const event of payload.items ?? []) {
+    const normalized = normalizeGoogleEventWindow(event);
+    if (!normalized) {
+      continue;
+    }
+    events.push({
+      id: `google:${event.id ?? crypto.randomUUID()}`,
+      provider: IntegrationProvider.GOOGLE,
+      providerSlug: "google",
+      title: event.summary?.trim() || "(Untitled event)",
+      startAt: normalized.startAt,
+      endAt: normalized.endAt,
+      isAllDay: normalized.isAllDay,
+      link: event.htmlLink ?? null,
+    });
+  }
+
+  return events;
+}
+
+async function fetchMicrosoftCalendarEventsRange(input: {
+  accessToken: string;
+  start: Date;
+  end: Date;
+  limit: number;
+}): Promise<SyncedCalendarEvent[]> {
+  const firstUrl = new URL("https://graph.microsoft.com/v1.0/me/calendarView");
+  firstUrl.searchParams.set("startDateTime", input.start.toISOString());
+  firstUrl.searchParams.set("endDateTime", input.end.toISOString());
+  firstUrl.searchParams.set("$top", String(Math.max(1, Math.min(input.limit, 200))));
+  firstUrl.searchParams.set("$orderby", "start/dateTime");
+  firstUrl.searchParams.set("$select", "id,subject,start,end,isAllDay,webLink");
+
+  const events: SyncedCalendarEvent[] = [];
+  let nextUrl: string | null = firstUrl.toString();
+  let pageCount = 0;
+  const maxPages = 5;
+
+  while (nextUrl && pageCount < maxPages && events.length < input.limit) {
+    pageCount += 1;
+    const response = await fetch(nextUrl, {
+      headers: {
+        authorization: `Bearer ${input.accessToken}`,
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new Error(message || "Microsoft Calendar sync failed");
+    }
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      value?: Array<{
+        id?: string;
+        subject?: string;
+        webLink?: string;
+        isAllDay?: boolean;
+        start?: { dateTime?: string | null };
+        end?: { dateTime?: string | null };
+      }>;
+      "@odata.nextLink"?: string;
+    };
+
+    for (const event of payload.value ?? []) {
+      if (events.length >= input.limit) {
+        break;
+      }
+      const normalized = normalizeMicrosoftEventWindow(event);
+      if (!normalized) {
+        continue;
+      }
+      events.push({
+        id: `microsoft:${event.id ?? crypto.randomUUID()}`,
+        provider: IntegrationProvider.MICROSOFT,
+        providerSlug: "microsoft",
+        title: event.subject?.trim() || "(Untitled event)",
+        startAt: normalized.startAt,
+        endAt: normalized.endAt,
+        isAllDay: normalized.isAllDay,
+        link: event.webLink ?? null,
+      });
+    }
+
+    const nextLink = payload["@odata.nextLink"];
+    nextUrl = typeof nextLink === "string" && nextLink.length > 0 ? nextLink : null;
+  }
+
+  return events;
+}
+
+async function syncProviderCalendarEvents(input: {
+  workspaceId: string;
+  provider: IntegrationProvider;
+  start: Date;
+  end: Date;
+  limitPerProvider: number;
+}) {
+  const accessToken = await getActiveAccessToken(input.workspaceId, input.provider);
+  const events =
+    input.provider === IntegrationProvider.GOOGLE
+      ? await fetchGoogleCalendarEventsRange({
+          accessToken,
+          start: input.start,
+          end: input.end,
+          limit: input.limitPerProvider,
+        })
+      : await fetchMicrosoftCalendarEventsRange({
+          accessToken,
+          start: input.start,
+          end: input.end,
+          limit: input.limitPerProvider,
+        });
+
+  await prisma.integrationAccount.updateMany({
+    where: {
+      workspaceId: input.workspaceId,
+      provider: input.provider,
+    },
+    data: {
+      status: IntegrationStatus.CONNECTED,
+      lastError: null,
+      lastSyncAt: new Date(),
+    },
+  });
+
+  return events;
+}
+
+export async function getSyncedCalendarEvents(input: {
+  workspaceId: string;
+  start: Date;
+  end: Date;
+  limitPerProvider?: number;
+}): Promise<SyncedCalendarResult> {
+  const start = new Date(input.start);
+  const end = new Date(input.end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    throw new Error("Invalid calendar range");
+  }
+
+  const connectedAccounts = await prisma.integrationAccount.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      accessTokenEncrypted: { not: null },
+    },
+    select: {
+      provider: true,
+    },
+    orderBy: {
+      provider: "asc",
+    },
+  });
+
+  const connectedProviders = new Set(connectedAccounts.map((account) => account.provider));
+  const providerStatusByProvider = new Map<IntegrationProvider, SyncedCalendarProviderStatus>(
+    Object.values(IntegrationProvider).map((provider) => [
+      provider,
+      toSyncedCalendarProviderStatus(provider, connectedProviders.has(provider), false),
+    ]),
+  );
+
+  if (connectedProviders.size === 0) {
+    return {
+      windowStart: start.toISOString(),
+      windowEnd: end.toISOString(),
+      hasConnectedProviders: false,
+      providers: Array.from(providerStatusByProvider.values()),
+      events: [],
+    };
+  }
+
+  const limitPerProvider = Math.max(25, Math.min(input.limitPerProvider ?? 500, 1000));
+  const events: SyncedCalendarEvent[] = [];
+
+  await Promise.all(
+    [...connectedProviders].map(async (provider) => {
+      try {
+        const providerEvents = await syncProviderCalendarEvents({
+          workspaceId: input.workspaceId,
+          provider,
+          start,
+          end,
+          limitPerProvider,
+        });
+        providerStatusByProvider.set(
+          provider,
+          toSyncedCalendarProviderStatus(provider, true, true, null),
+        );
+        events.push(...providerEvents);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Calendar sync failed for provider";
+        await prisma.integrationAccount.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            provider,
+          },
+          data: {
+            status: IntegrationStatus.ERROR,
+            lastError: message,
+          },
+        });
+        providerStatusByProvider.set(
+          provider,
+          toSyncedCalendarProviderStatus(provider, true, false, message),
+        );
+      }
+    }),
+  );
+
+  events.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+
+  return {
+    windowStart: start.toISOString(),
+    windowEnd: end.toISOString(),
+    hasConnectedProviders: connectedProviders.size > 0,
+    providers: Array.from(providerStatusByProvider.values()),
+    events,
+  };
 }
 
 async function fetchGooglePreview(accessToken: string): Promise<IntegrationPreview> {

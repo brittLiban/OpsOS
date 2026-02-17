@@ -2,6 +2,7 @@ import {
   AlarmClock,
   BookTemplate,
   Building2,
+  CalendarDays,
   ChartNoAxesCombined,
   Columns3,
   CreditCard,
@@ -18,6 +19,7 @@ export const NAV_GROUPS = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: ChartNoAxesCombined },
       { href: "/today", label: "Today", icon: AlarmClock },
+      { href: "/calendar", label: "Calendar", icon: CalendarDays },
       { href: "/leads", label: "Leads", icon: Users },
       { href: "/calls", label: "Call Queue", icon: Phone },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
@@ -34,22 +36,12 @@ export const NAV_GROUPS = [
   },
   {
     label: "Enablement",
-    items: [{ href: "/scripts", label: "Scripts", icon: BookTemplate }],
+    items: [{ href: "/scripts", label: "Templates", icon: BookTemplate }],
   },
   {
     label: "Settings",
     items: [
-      { href: "/settings/pipelines", label: "Pipelines", icon: Settings },
-      { href: "/settings/fields", label: "Custom Fields", icon: Settings },
-      { href: "/settings/task-fields", label: "Task Fields", icon: Settings },
-      { href: "/settings/integrations", label: "Integrations", icon: Settings },
-      { href: "/settings/stripe", label: "Stripe", icon: CreditCard },
-      {
-        href: "/settings/script-categories",
-        label: "Script Categories",
-        icon: Settings,
-      },
-      { href: "/settings/billing-types", label: "Billing Types", icon: Settings },
+      { href: "/settings", label: "Workspace Settings", icon: Settings },
     ],
   },
 ] as const;

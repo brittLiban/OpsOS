@@ -43,6 +43,7 @@ export function ScriptsPageClient({
   const [categoryId, setCategoryId] = React.useState("all");
   const [openCreate, setOpenCreate] = React.useState(false);
   const [editingScript, setEditingScript] = React.useState<Script | null>(null);
+  const [installingStarter, setInstallingStarter] = React.useState(false);
 
   const [title, setTitle] = React.useState("");
   const [content, setContent] = React.useState("");
@@ -65,6 +66,56 @@ export function ScriptsPageClient({
     setTags("");
     setSelectedCategoryId("none");
     setEditingScript(null);
+  }
+
+  function mergeScripts(incoming: Script[]) {
+    setScripts((current) => {
+      const byId = new Map(current.map((script) => [script.id, script]));
+      for (const script of incoming) {
+        byId.set(script.id, script);
+      }
+      return Array.from(byId.values()).sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+    });
+  }
+
+  async function installStarterTemplates() {
+    if (installingStarter) {
+      return;
+    }
+    setInstallingStarter(true);
+    try {
+      const response = await fetch("/api/v1/scripts/starter-pack", {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error();
+      }
+
+      const json = (await response.json()) as {
+        data: {
+          createdCount: number;
+          skippedCount: number;
+          created: Script[];
+        };
+      };
+
+      mergeScripts(json.data.created);
+      if (json.data.createdCount > 0) {
+        toast.success(
+          `${json.data.createdCount} starter template${
+            json.data.createdCount === 1 ? "" : "s"
+          } added`,
+        );
+      } else {
+        toast.success("Starter templates already installed");
+      }
+    } catch {
+      toast.error("Failed to install starter templates");
+    } finally {
+      setInstallingStarter(false);
+    }
   }
 
   async function saveScript() {
@@ -93,19 +144,15 @@ export function ScriptsPageClient({
         return;
       }
       const json = (await response.json()) as { data: Script };
-      setScripts((current) =>
-        current.map((script) =>
-          script.id === editingScript.id
-            ? {
-                ...json.data,
-                category:
-                  categories.find((category) => category.id === json.data.categoryId) ??
-                  null,
-              }
-            : script,
-        ),
-      );
-      toast.success("Script updated");
+      mergeScripts([
+        {
+          ...json.data,
+          category:
+            categories.find((category) => category.id === json.data.categoryId) ??
+            null,
+        },
+      ]);
+      toast.success("Template updated");
     } else {
       const response = await fetch("/api/v1/scripts", {
         method: "POST",
@@ -117,16 +164,15 @@ export function ScriptsPageClient({
         return;
       }
       const json = (await response.json()) as { data: Script };
-      setScripts((current) => [
+      mergeScripts([
         {
           ...json.data,
           category:
             categories.find((category) => category.id === json.data.categoryId) ??
             null,
         },
-        ...current,
       ]);
-      toast.success("Script created");
+      toast.success("Template created");
     }
 
     setOpenCreate(false);
@@ -136,11 +182,11 @@ export function ScriptsPageClient({
   async function deleteScript(scriptId: string) {
     const response = await fetch(`/api/v1/scripts/${scriptId}`, { method: "DELETE" });
     if (!response.ok) {
-      toast.error("Failed to delete script");
+      toast.error("Failed to delete template");
       return;
     }
     setScripts((current) => current.filter((script) => script.id !== scriptId));
-    toast.success("Script deleted");
+    toast.success("Template deleted");
   }
 
   async function copyScript(contentValue: string) {
@@ -172,79 +218,118 @@ export function ScriptsPageClient({
     }
   }
 
+  async function duplicateScript(script: Script) {
+    const response = await fetch("/api/v1/scripts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: `${script.title} (Copy)`,
+        content: script.content,
+        categoryId: script.categoryId,
+        tags: script.tags,
+        isActive: script.isActive,
+      }),
+    });
+
+    if (!response.ok) {
+      toast.error("Failed to duplicate template");
+      return;
+    }
+
+    const json = (await response.json()) as { data: Script };
+    mergeScripts([
+      {
+        ...json.data,
+        category:
+          categories.find((category) => category.id === json.data.categoryId) ??
+          null,
+      },
+    ]);
+    toast.success("Template duplicated");
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Scripts"
-        subtitle="Reusable templates for Today and Lead Detail quick actions."
+        title="Templates"
+        subtitle="Shared workspace templates. Edit, duplicate, and tailor them to your style."
         actions={
-          <Dialog
-            open={openCreate}
-            onOpenChange={(open) => {
-              setOpenCreate(open);
-              if (!open) {
-                resetForm();
-              }
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                New Script
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-xl">
-              <DialogHeader>
-                <DialogTitle>{editingScript ? "Edit Script" : "Create Script"}</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="script-title">Title</Label>
-                  <Input
-                    id="script-title"
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Category</Label>
-                  <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Uncategorized</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="script-content">Content</Label>
-                  <Textarea
-                    id="script-content"
-                    rows={8}
-                    value={content}
-                    onChange={(event) => setContent(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="script-tags">Tags (comma separated)</Label>
-                  <Input
-                    id="script-tags"
-                    value={tags}
-                    onChange={(event) => setTags(event.target.value)}
-                  />
-                </div>
-                <Button className="w-full" onClick={saveScript}>
-                  Save
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={installStarterTemplates}
+              disabled={installingStarter}
+            >
+              {installingStarter ? "Installing..." : "Install Starter Templates"}
+            </Button>
+            <Dialog
+              open={openCreate}
+              onOpenChange={(open) => {
+                setOpenCreate(open);
+                if (!open) {
+                  resetForm();
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Template
                 </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>{editingScript ? "Edit Template" : "Create Template"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="script-title">Title</Label>
+                    <Input
+                      id="script-title"
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Category</Label>
+                    <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Uncategorized</SelectItem>
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="script-content">Content</Label>
+                    <Textarea
+                      id="script-content"
+                      rows={8}
+                      value={content}
+                      onChange={(event) => setContent(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="script-tags">Tags (comma separated)</Label>
+                    <Input
+                      id="script-tags"
+                      value={tags}
+                      onChange={(event) => setTags(event.target.value)}
+                    />
+                  </div>
+                  <Button className="w-full" onClick={saveScript}>
+                    Save
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
         }
       />
 
@@ -254,7 +339,7 @@ export function ScriptsPageClient({
           <Input
             value={q}
             onChange={(event) => setQ(event.target.value)}
-            placeholder="Search scripts"
+            placeholder="Search templates"
             className="pl-8"
           />
         </div>
@@ -275,9 +360,9 @@ export function ScriptsPageClient({
 
       {filtered.length === 0 ? (
         <EmptyState
-          title="No scripts found"
-          description="Create a script template to reuse in Today and lead workflows."
-          ctaLabel="Create Script"
+          title="No templates found"
+          description="Create or install starter templates, then edit them to match your style."
+          ctaLabel="Create Template"
           onCta={() => setOpenCreate(true)}
         />
       ) : (
@@ -328,6 +413,13 @@ export function ScriptsPageClient({
                     <Pencil className="mr-2 h-4 w-4" />
                     Edit
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void duplicateScript(script)}
+                  >
+                    Duplicate
+                  </Button>
                   <ConfirmDialog
                     trigger={
                       <Button size="sm" variant="ghost">
@@ -335,8 +427,8 @@ export function ScriptsPageClient({
                         Delete
                       </Button>
                     }
-                    title="Delete script"
-                    description="This removes the script template permanently."
+                    title="Delete template"
+                    description="This removes the template permanently."
                     confirmLabel="Delete"
                     onConfirm={() => deleteScript(script.id)}
                   />

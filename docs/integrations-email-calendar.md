@@ -8,6 +8,7 @@ Ops OS supports workspace-level OAuth integrations for:
 
 - `Settings -> Integrations`
 - URL: `/settings/integrations`
+- Visual synced calendar: `/calendar`
 
 ## No Source-Code Setup Path
 
@@ -66,6 +67,7 @@ Ops OS stores OAuth tokens encrypted using `OPSOS_SECRET_ENCRYPTION_KEY`.
 3. Complete provider consent
 4. Back in Ops OS, click `Preview Sync`
 5. Confirm recent emails and upcoming events appear
+6. Open `/calendar` and confirm month events are visible and grouped by provider
 
 ## Troubleshooting
 

@@ -13,7 +13,7 @@
   - Required environment variables
 - `docs/integrations-email-calendar.md`
   - Google + Microsoft OAuth setup
-  - Email + calendar preview sync
+  - Email + calendar sync (including `/calendar` visual view)
   - Required environment variables and callback URLs
 - `docs/testing.md`
   - Unit/integration/e2e test commands

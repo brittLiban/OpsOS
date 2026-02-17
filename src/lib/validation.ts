@@ -218,3 +218,21 @@ export const todayQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
   ownerScope: z.enum(["me", "all"]).default("me"),
 });
+
+export const calendarEventsQuerySchema = z
+  .object({
+    start: z.string().datetime().optional(),
+    end: z.string().datetime().optional(),
+  })
+  .refine(
+    (value) => {
+      if (!value.start || !value.end) {
+        return true;
+      }
+      return new Date(value.end).getTime() > new Date(value.start).getTime();
+    },
+    {
+      path: ["end"],
+      message: "end must be greater than start",
+    },
+  );
