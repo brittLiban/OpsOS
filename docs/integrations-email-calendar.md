@@ -69,6 +69,12 @@ Ops OS stores OAuth tokens encrypted using `OPSOS_SECRET_ENCRYPTION_KEY`.
 5. Confirm recent emails and upcoming events appear
 6. Open `/calendar` and confirm month events are visible and grouped by provider
 
+## Two-Way Calendar Sync
+
+- Ops OS pulls events from connected providers into `/calendar`.
+- Ops OS can also create appointments from `/calendar` using `New Appointment`.
+- Created appointments are pushed to the selected provider (`Google` or `Microsoft`) and then appear in the monthly view after refresh.
+
 ## Troubleshooting
 
 - If you see a schema error:

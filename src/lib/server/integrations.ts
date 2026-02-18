@@ -141,6 +141,17 @@ export type SyncedCalendarResult = {
   events: SyncedCalendarEvent[];
 };
 
+export type CalendarEventCreateInput = {
+  workspaceId: string;
+  provider: IntegrationProvider;
+  title: string;
+  startAt: Date;
+  endAt?: Date | null;
+  isAllDay?: boolean;
+  description?: string | null;
+  location?: string | null;
+};
+
 type OAuthTokenPayload = {
   accessToken: string;
   refreshToken: string | null;
@@ -895,6 +906,24 @@ function normalizeIsoDateTime(value: string | null | undefined) {
   return date.toISOString();
 }
 
+function addDaysUtc(value: Date, days: number) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date;
+}
+
+function startOfUtcDay(value: Date) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+function toIsoDateUtc(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function toGraphDateTimeValue(value: Date) {
+  return value.toISOString().replace("Z", "");
+}
+
 function normalizeAllDayDate(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -1196,6 +1225,252 @@ export async function getSyncedCalendarEvents(input: {
     providers: Array.from(providerStatusByProvider.values()),
     events,
   };
+}
+
+function normalizeCreateCalendarInput(input: CalendarEventCreateInput) {
+  const title = input.title.trim();
+  if (!title) {
+    throw new Error("Title is required");
+  }
+
+  const startAt = new Date(input.startAt);
+  if (Number.isNaN(startAt.getTime())) {
+    throw new Error("Invalid start time");
+  }
+
+  const endAt = input.endAt ? new Date(input.endAt) : null;
+  if (endAt && Number.isNaN(endAt.getTime())) {
+    throw new Error("Invalid end time");
+  }
+
+  return {
+    title,
+    startAt,
+    endAt,
+    isAllDay: Boolean(input.isAllDay),
+    description: input.description?.trim() || null,
+    location: input.location?.trim() || null,
+  };
+}
+
+async function createGoogleCalendarEvent(input: {
+  accessToken: string;
+  title: string;
+  startAt: Date;
+  endAt: Date | null;
+  isAllDay: boolean;
+  description: string | null;
+  location: string | null;
+}): Promise<SyncedCalendarEvent> {
+  let start: { dateTime?: string; date?: string };
+  let end: { dateTime?: string; date?: string };
+
+  if (input.isAllDay) {
+    const startDay = startOfUtcDay(input.startAt);
+    let endDay = input.endAt ? startOfUtcDay(input.endAt) : addDaysUtc(startDay, 1);
+    if (endDay.getTime() <= startDay.getTime()) {
+      endDay = addDaysUtc(startDay, 1);
+    }
+    start = { date: toIsoDateUtc(startDay) };
+    end = { date: toIsoDateUtc(endDay) };
+  } else {
+    const endAt =
+      input.endAt && input.endAt.getTime() > input.startAt.getTime()
+        ? input.endAt
+        : new Date(input.startAt.getTime() + 30 * 60 * 1000);
+    start = { dateTime: input.startAt.toISOString() };
+    end = { dateTime: endAt.toISOString() };
+  }
+
+  const response = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.accessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      summary: input.title,
+      description: input.description ?? undefined,
+      location: input.location ?? undefined,
+      start,
+      end,
+    }),
+    cache: "no-store",
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    id?: string;
+    summary?: string;
+    htmlLink?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error?.message ?? "Failed to create Google calendar event");
+  }
+
+  const normalized = normalizeGoogleEventWindow({
+    start: payload.start,
+    end: payload.end,
+  });
+  if (!normalized) {
+    throw new Error("Google returned invalid event payload");
+  }
+
+  return {
+    id: `google:${payload.id ?? crypto.randomUUID()}`,
+    provider: IntegrationProvider.GOOGLE,
+    providerSlug: "google",
+    title: payload.summary?.trim() || input.title,
+    startAt: normalized.startAt,
+    endAt: normalized.endAt,
+    isAllDay: normalized.isAllDay,
+    link: payload.htmlLink ?? null,
+  };
+}
+
+async function createMicrosoftCalendarEvent(input: {
+  accessToken: string;
+  title: string;
+  startAt: Date;
+  endAt: Date | null;
+  isAllDay: boolean;
+  description: string | null;
+  location: string | null;
+}): Promise<SyncedCalendarEvent> {
+  let startAt: Date;
+  let endAt: Date;
+
+  if (input.isAllDay) {
+    startAt = startOfUtcDay(input.startAt);
+    endAt = input.endAt ? startOfUtcDay(input.endAt) : addDaysUtc(startAt, 1);
+    if (endAt.getTime() <= startAt.getTime()) {
+      endAt = addDaysUtc(startAt, 1);
+    }
+  } else {
+    startAt = input.startAt;
+    endAt =
+      input.endAt && input.endAt.getTime() > input.startAt.getTime()
+        ? input.endAt
+        : new Date(input.startAt.getTime() + 30 * 60 * 1000);
+  }
+
+  const response = await fetch("https://graph.microsoft.com/v1.0/me/events", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.accessToken}`,
+      "content-type": "application/json",
+      Prefer: 'outlook.timezone="UTC"',
+    },
+    body: JSON.stringify({
+      subject: input.title,
+      body: input.description
+        ? {
+            contentType: "Text",
+            content: input.description,
+          }
+        : undefined,
+      location: input.location
+        ? {
+            displayName: input.location,
+          }
+        : undefined,
+      isAllDay: input.isAllDay,
+      start: {
+        dateTime: toGraphDateTimeValue(startAt),
+        timeZone: "UTC",
+      },
+      end: {
+        dateTime: toGraphDateTimeValue(endAt),
+        timeZone: "UTC",
+      },
+    }),
+    cache: "no-store",
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    id?: string;
+    subject?: string;
+    webLink?: string;
+    isAllDay?: boolean;
+    start?: { dateTime?: string | null };
+    end?: { dateTime?: string | null };
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error?.message ?? "Failed to create Microsoft calendar event");
+  }
+
+  const normalized = normalizeMicrosoftEventWindow({
+    start: payload.start,
+    end: payload.end,
+    isAllDay: payload.isAllDay,
+  });
+  if (!normalized) {
+    throw new Error("Microsoft returned invalid event payload");
+  }
+
+  return {
+    id: `microsoft:${payload.id ?? crypto.randomUUID()}`,
+    provider: IntegrationProvider.MICROSOFT,
+    providerSlug: "microsoft",
+    title: payload.subject?.trim() || input.title,
+    startAt: normalized.startAt,
+    endAt: normalized.endAt,
+    isAllDay: normalized.isAllDay,
+    link: payload.webLink ?? null,
+  };
+}
+
+export async function createSyncedCalendarEvent(
+  input: CalendarEventCreateInput,
+): Promise<SyncedCalendarEvent> {
+  const normalized = normalizeCreateCalendarInput(input);
+  const accessToken = await getActiveAccessToken(input.workspaceId, input.provider);
+
+  try {
+    const created =
+      input.provider === IntegrationProvider.GOOGLE
+        ? await createGoogleCalendarEvent({
+            accessToken,
+            ...normalized,
+          })
+        : await createMicrosoftCalendarEvent({
+            accessToken,
+            ...normalized,
+          });
+
+    await prisma.integrationAccount.updateMany({
+      where: {
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+      },
+      data: {
+        status: IntegrationStatus.CONNECTED,
+        lastError: null,
+        lastSyncAt: new Date(),
+      },
+    });
+
+    return created;
+  } catch (error) {
+    const lastError =
+      error instanceof Error ? error.message : "Failed to create calendar event";
+    await prisma.integrationAccount.updateMany({
+      where: {
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+      },
+      data: {
+        status: IntegrationStatus.ERROR,
+        lastError,
+      },
+    });
+    throw error;
+  }
 }
 
 async function fetchGooglePreview(accessToken: string): Promise<IntegrationPreview> {

@@ -236,3 +236,33 @@ export const calendarEventsQuerySchema = z
       message: "end must be greater than start",
     },
   );
+
+const calendarDateTimeInputSchema = z
+  .union([z.string(), z.date()])
+  .transform((value) => new Date(value))
+  .refine((value) => !Number.isNaN(value.getTime()), {
+    message: "Invalid date value",
+  });
+
+export const calendarEventCreateSchema = z
+  .object({
+    provider: z.enum(["google", "microsoft"]),
+    title: z.string().trim().min(1).max(200),
+    description: optionalStringSchema,
+    location: optionalStringSchema,
+    isAllDay: z.coerce.boolean().default(false),
+    startAt: calendarDateTimeInputSchema,
+    endAt: calendarDateTimeInputSchema.optional().nullable(),
+  })
+  .refine(
+    (value) => {
+      if (!value.endAt) {
+        return true;
+      }
+      return value.endAt.getTime() > value.startAt.getTime();
+    },
+    {
+      path: ["endAt"],
+      message: "endAt must be after startAt",
+    },
+  );

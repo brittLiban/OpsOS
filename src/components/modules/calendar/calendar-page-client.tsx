@@ -1,21 +1,35 @@
 "use client";
 
 import * as React from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, RefreshCcw } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Plus,
+  RefreshCcw,
+} from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
 import { StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type CalendarProvider = "GOOGLE" | "MICROSOFT";
+type CalendarProviderSlug = "google" | "microsoft";
 
 type CalendarProviderStatus = {
   provider: CalendarProvider;
-  slug: "google" | "microsoft";
+  slug: CalendarProviderSlug;
   label: string;
   connected: boolean;
   synced: boolean;
@@ -25,7 +39,7 @@ type CalendarProviderStatus = {
 type CalendarEvent = {
   id: string;
   provider: CalendarProvider;
-  providerSlug: "google" | "microsoft";
+  providerSlug: CalendarProviderSlug;
   title: string;
   startAt: string;
   endAt: string | null;
@@ -41,8 +55,16 @@ type CalendarData = {
   events: CalendarEvent[];
 };
 
-type ApiResponse =
+type CalendarEventsApiResponse =
   | { data: CalendarData }
+  | {
+      error?: {
+        message?: string;
+      };
+    };
+
+type CalendarEventCreateApiResponse =
+  | { data: CalendarEvent }
   | {
       error?: {
         message?: string;
@@ -71,10 +93,27 @@ export function CalendarPageClient({ initialData }: { initialData: CalendarData 
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const requestCounter = React.useRef(0);
 
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [createProvider, setCreateProvider] = React.useState<CalendarProviderSlug>("google");
+  const [createTitle, setCreateTitle] = React.useState("");
+  const [createDescription, setCreateDescription] = React.useState("");
+  const [createLocation, setCreateLocation] = React.useState("");
+  const [createAllDay, setCreateAllDay] = React.useState(false);
+  const [createStartDateTime, setCreateStartDateTime] = React.useState("");
+  const [createEndDateTime, setCreateEndDateTime] = React.useState("");
+  const [createStartDate, setCreateStartDate] = React.useState("");
+  const [createEndDate, setCreateEndDate] = React.useState("");
+
   const eventsByDay = React.useMemo(() => groupEventsByDay(data.events), [data.events]);
   const monthDays = React.useMemo(() => buildMonthGridDays(viewMonth), [viewMonth]);
-
   const selectedDayEvents = eventsByDay.get(selectedDayKey) ?? [];
+
+  const connectedProviders = React.useMemo(
+    () => data.providers.filter((provider) => provider.connected),
+    [data.providers],
+  );
+  const hasConnectedProviders = connectedProviders.length > 0;
 
   const fetchMonth = React.useCallback(async (month: Date) => {
     const currentRequest = ++requestCounter.current;
@@ -93,10 +132,9 @@ export function CalendarPageClient({ initialData }: { initialData: CalendarData 
         method: "GET",
         cache: "no-store",
       });
-      const payload = (await response.json().catch(() => ({}))) as ApiResponse;
+      const payload = (await response.json().catch(() => ({}))) as CalendarEventsApiResponse;
       if (!response.ok || !("data" in payload)) {
-        const message =
-          "error" in payload ? payload.error?.message : undefined;
+        const message = "error" in payload ? payload.error?.message : undefined;
         throw new Error(message ?? "Failed to load calendar events");
       }
       if (currentRequest !== requestCounter.current) {
@@ -119,6 +157,18 @@ export function CalendarPageClient({ initialData }: { initialData: CalendarData 
     }
   }, []);
 
+  React.useEffect(() => {
+    if (connectedProviders.length === 0) {
+      return;
+    }
+    setCreateProvider((current) => {
+      if (connectedProviders.some((provider) => provider.slug === current)) {
+        return current;
+      }
+      return connectedProviders[0].slug;
+    });
+  }, [connectedProviders]);
+
   function goToMonth(nextMonth: Date) {
     const normalized = startOfMonth(nextMonth);
     setViewMonth(normalized);
@@ -140,6 +190,87 @@ export function CalendarPageClient({ initialData }: { initialData: CalendarData 
     void fetchMonth(viewMonth);
   }
 
+  function resetCreateForm(dayKey = selectedDayKey) {
+    const defaults = createFormDefaults(dayKey);
+    setCreateTitle("");
+    setCreateDescription("");
+    setCreateLocation("");
+    setCreateAllDay(false);
+    setCreateStartDateTime(defaults.startDateTime);
+    setCreateEndDateTime(defaults.endDateTime);
+    setCreateStartDate(defaults.startDate);
+    setCreateEndDate("");
+  }
+
+  async function createAppointment() {
+    if (!hasConnectedProviders) {
+      toast.error("Connect a calendar provider first");
+      return;
+    }
+    if (!createTitle.trim()) {
+      toast.error("Appointment title is required");
+      return;
+    }
+
+    let startAt: Date | null = null;
+    let endAt: Date | null = null;
+
+    if (createAllDay) {
+      startAt = parseDateInputValue(createStartDate);
+      endAt = createEndDate ? parseDateInputValue(createEndDate) : null;
+    } else {
+      startAt = parseDateTimeInputValue(createStartDateTime);
+      endAt = createEndDateTime ? parseDateTimeInputValue(createEndDateTime) : null;
+    }
+
+    if (!startAt) {
+      toast.error("Start date/time is invalid");
+      return;
+    }
+
+    if (endAt && endAt.getTime() <= startAt.getTime()) {
+      toast.error("End date/time must be after start date/time");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const response = await fetch("/api/v1/calendar/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: createProvider,
+          title: createTitle.trim(),
+          description: createDescription.trim() || null,
+          location: createLocation.trim() || null,
+          isAllDay: createAllDay,
+          startAt: startAt.toISOString(),
+          endAt: endAt ? endAt.toISOString() : null,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as CalendarEventCreateApiResponse;
+      if (!response.ok || !("data" in payload)) {
+        const message = "error" in payload ? payload.error?.message : undefined;
+        throw new Error(message ?? "Failed to create appointment");
+      }
+
+      const createdDayKey = toEventDateKey(payload.data);
+      if (createdDayKey) {
+        setSelectedDayKey(createdDayKey);
+      }
+
+      setCreateOpen(false);
+      resetCreateForm();
+      await fetchMonth(viewMonth);
+      toast.success("Appointment created and synced");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create appointment");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -147,6 +278,121 @@ export function CalendarPageClient({ initialData }: { initialData: CalendarData 
         subtitle="Visual monthly schedule synced from connected Google and Outlook calendars."
         actions={
           <>
+            <Dialog
+              open={createOpen}
+              onOpenChange={(open) => {
+                setCreateOpen(open);
+                if (open) {
+                  resetCreateForm(selectedDayKey);
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button disabled={!hasConnectedProviders}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  New Appointment
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Create Appointment</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Provider</Label>
+                    <Select value={createProvider} onValueChange={(value) => setCreateProvider(value as CalendarProviderSlug)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {connectedProviders.map((provider) => (
+                          <SelectItem key={provider.slug} value={provider.slug}>
+                            {provider.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="appointment-title">Title</Label>
+                    <Input
+                      id="appointment-title"
+                      value={createTitle}
+                      onChange={(event) => setCreateTitle(event.target.value)}
+                      placeholder="Discovery call with Acme Roofing"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={createAllDay}
+                      onCheckedChange={(checked) => setCreateAllDay(Boolean(checked))}
+                    />
+                    All-day appointment
+                  </label>
+                  {createAllDay ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Start date</Label>
+                        <Input
+                          type="date"
+                          value={createStartDate}
+                          onChange={(event) => setCreateStartDate(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>End date (optional)</Label>
+                        <Input
+                          type="date"
+                          value={createEndDate}
+                          onChange={(event) => setCreateEndDate(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Start</Label>
+                        <Input
+                          type="datetime-local"
+                          value={createStartDateTime}
+                          onChange={(event) => setCreateStartDateTime(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>End (optional)</Label>
+                        <Input
+                          type="datetime-local"
+                          value={createEndDateTime}
+                          onChange={(event) => setCreateEndDateTime(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="appointment-location">Location (optional)</Label>
+                    <Input
+                      id="appointment-location"
+                      value={createLocation}
+                      onChange={(event) => setCreateLocation(event.target.value)}
+                      placeholder="Zoom / Office / Customer Site"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="appointment-description">Notes (optional)</Label>
+                    <Textarea
+                      id="appointment-description"
+                      rows={4}
+                      value={createDescription}
+                      onChange={(event) => setCreateDescription(event.target.value)}
+                      placeholder="Agenda, talking points, prep notes..."
+                    />
+                  </div>
+                  <Button className="w-full" onClick={() => void createAppointment()} disabled={creating}>
+                    {creating ? "Creating..." : "Create + Sync"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
             <Button variant="secondary" onClick={() => goToMonth(addMonths(viewMonth, -1))}>
               <ChevronLeft className="mr-2 h-4 w-4" />
               Prev
@@ -171,13 +417,7 @@ export function CalendarPageClient({ initialData }: { initialData: CalendarData 
         {data.providers.map((provider) => (
           <StatusBadge
             key={provider.provider}
-            label={`${provider.slug}: ${
-              !provider.connected
-                ? "not connected"
-                : provider.synced
-                  ? "synced"
-                  : "sync error"
-            }`}
+            label={`${provider.slug}: ${!provider.connected ? "not connected" : provider.synced ? "synced" : "sync error"}`}
             variant={!provider.connected ? "outline" : provider.synced ? "default" : "destructive"}
           />
         ))}
@@ -335,6 +575,17 @@ function CalendarGridSkeleton() {
   );
 }
 
+function createFormDefaults(dayKey: string) {
+  const day = parseDateKey(dayKey) ?? new Date();
+  const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0, 0, 0);
+  const end = new Date(start.getTime() + 30 * 60 * 1000);
+  return {
+    startDateTime: toDateTimeInputValue(start),
+    endDateTime: toDateTimeInputValue(end),
+    startDate: toDateInputValue(day),
+  };
+}
+
 function groupEventsByDay(events: CalendarEvent[]) {
   const grouped = new Map<string, CalendarEvent[]>();
   for (const event of events) {
@@ -423,6 +674,30 @@ function parseDateKey(dateKey: string) {
     return null;
   }
   const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toDateInputValue(value: Date) {
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+
+function toDateTimeInputValue(value: Date) {
+  return `${toDateInputValue(value)}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
+function parseDateInputValue(value: string) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseDateTimeInputValue(value: string) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 

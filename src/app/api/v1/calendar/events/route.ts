@@ -1,7 +1,11 @@
-import { HttpError, ok, parseSearchParams, withErrorHandling } from "@/lib/server/api";
+import { HttpError, ok, parseBody, parseSearchParams, withErrorHandling } from "@/lib/server/api";
 import { getSessionContext } from "@/lib/server/auth";
-import { getSyncedCalendarEvents } from "@/lib/server/integrations";
-import { calendarEventsQuerySchema } from "@/lib/validation";
+import {
+  createSyncedCalendarEvent,
+  getSyncedCalendarEvents,
+  parseIntegrationProviderSlug,
+} from "@/lib/server/integrations";
+import { calendarEventCreateSchema, calendarEventsQuerySchema } from "@/lib/validation";
 
 function getMonthWindow(date = new Date()) {
   const start = new Date(date.getFullYear(), date.getMonth(), 1);
@@ -29,5 +33,26 @@ export async function GET(request: Request) {
     });
 
     return ok(result);
+  });
+}
+
+export async function POST(request: Request) {
+  return withErrorHandling(async () => {
+    const session = await getSessionContext();
+    const body = await parseBody(request, calendarEventCreateSchema);
+    const provider = parseIntegrationProviderSlug(body.provider);
+
+    const created = await createSyncedCalendarEvent({
+      workspaceId: session.workspaceId,
+      provider,
+      title: body.title,
+      description: body.description,
+      location: body.location,
+      isAllDay: body.isAllDay,
+      startAt: body.startAt,
+      endAt: body.endAt,
+    });
+
+    return ok(created);
   });
 }
